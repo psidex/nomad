@@ -1,0 +1,63 @@
+{
+  "name": "frontend",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build": "npx esbuild ./src/index.tsx --minify --bundle --platform=browser --outfile=./public/index.js",
+    "watch": "npx watch \"npm run build\" ./src",
+    "serve": "go run ../cmd/nomadws"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "GPL-3.0-only",
+  "dependencies": {
+    "@react-sigma/core": "^3.4.2",
+    "@react-sigma/layout-core": "^3.4.2",
+    "@react-sigma/layout-forceatlas2": "^3.4.2",
+    "graphology": "^0.25.4",
+    "graphology-types": "^0.24.7",
+    "lodash": "^4.17.21",
+    "lucide-react": "0.418.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "sigma": "^2.4.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.66",
+    "@types/react-dom": "^18.2.22",
+    "@typescript-eslint/eslint-plugin": "8.0.0",
+    "@typescript-eslint/parser": "8.0.0",
+    "esbuild": "0.23.0",
+    "eslint": "9.8.0",
+    "eslint-config-airbnb": "^19.0.4",
+    "eslint-config-airbnb-typescript": "^18.0.0",
+    "eslint-plugin-import": "^2.25.3",
+    "eslint-plugin-jsx-a11y": "^6.5.1",
+    "eslint-plugin-react": "^7.28.0",
+    "eslint-plugin-react-hooks": "^4.3.0",
+    "watch": "^1.0.2"
+  },
+  "eslintConfig": {
+    "env": {
+      "es6": true,
+      "browser": true
+    },
+    "ignorePatterns": [
+      "*.js"
+    ],
+    "extends": [
+      "airbnb",
+      "airbnb/hooks",
+      "airbnb-typescript"
+    ],
+    "parserOptions": {
+      "project": "./tsconfig.json"
+    },
+    "rules": {
+      "no-restricted-syntax": "off",
+      "jsx-a11y/label-has-associated-control": "off"
+    }
+  }
+}

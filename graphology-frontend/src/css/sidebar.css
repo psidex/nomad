@@ -1,0 +1,50 @@
+.sidebar,
+.sidebar-status,
+.sidebar-buttons,
+.sidebar-option {
+  display: flex;
+}
+
+.sidebar {
+  flex-direction: column;
+  justify-content: space-evenly;
+  align-items: center;
+  position: absolute;
+  height: 20rem;
+  width: 20rem;
+  top: 5vh;
+  left: 2.5vw;
+  background-color: #eaeaea;
+  opacity: 0.75;
+}
+
+.sidebar-status {
+  align-items: center;
+  justify-content: space-around;
+  width: 60%;
+}
+
+.sidebar-buttons {
+  justify-content: space-evenly;
+}
+
+.sidebar-buttons * {
+  font-size: 1rem;
+  width: 5em;
+  height: 2em;
+}
+
+.sidebar-option {
+  justify-content: space-evenly;
+  width: 90%;
+}
+
+.sidebar-option>label {
+  width: 50%;
+  text-align: right;
+}
+
+.sidebar-option>input {
+  width: 45%;
+  margin-left: 5%;
+}
