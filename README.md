@@ -1,6 +1,6 @@
 # Nomad
 
-A work-in-progress experimental web crawler that attempts to map the connections between domains.
+A work-in-progress experimental web crawler to visualise & map the connections between domains.
 
 ## Design
 
