@@ -12,7 +12,7 @@ Most crawlers are created to search the depth of websites to find everything ind
 
 ### Web Server
 
-- See [graphology-frontend's readme](./graphology-frontend/)
+- See [nomad-frontend's readme](./nomad-frontend/)
 - Runs a web server, serving a React frontend & WebSocket based API
 - Configured, started, and stopped via API
 - Feeds data back over the WebSocket to display crawl data in real time
@@ -36,7 +36,7 @@ Depending on the graph provider you choose there are different ways to view the 
 
 ### [Graphology](https://graphology.github.io/)
 
-Implemented by `graphology.Graphology`, outputs a `graphology.json` file which you can then load into a Graphology based UI (supported by [graphology-frontend](./graphology-frontend/)).
+Implemented by `graphology.Graphology`, outputs a `graphology.json` file which you can then load into a Graphology based UI (supported by [nomad-frontend](./nomad-frontend/)).
 
 This has great performance and works well to visualise the whole network:
 

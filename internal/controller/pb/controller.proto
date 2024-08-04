@@ -1,0 +1,90 @@
+syntax = "proto3";
+
+option go_package = "github.com/psidex/nomad/internal/controller/pb";
+
+package pb;
+
+service Controller {
+  // A bi-directional stream for scraping
+  rpc Scrape(stream ScrapeStreamMessage) returns (stream ScrapeStreamMessage);
+  // Register an agent with this controller
+  rpc RegisterAgent(RegisterAgentRequest) returns (RegisterAgentResponse);
+}
+
+// Message for the bi-directional stream
+message ScrapeStreamMessage {
+  oneof message {
+    // Should only be sent by the controller to an agent
+    ScrapeInstruction scrape_instruction = 1;
+    // Should only be sent by the controller to an agent
+    AgentConfigUpdate config_update = 2;
+    // Should only be sent by an agent to the controller
+    ScrapeInformation scrape_information = 3;
+  }
+}
+
+// An instruction from the controller to agent of what to scrape
+message ScrapeInstruction {
+  // A list of URLs to scrape
+  repeated string urls = 1;
+}
+
+// Configuration update for the agent
+message AgentConfigUpdate {
+  // The timeout the agent should use for each single scrape
+  int32 single_scrape_timeout_ms = 1;
+}
+
+// If not NONE, the reason for a scrape failure
+enum URLRequestErrorCode {
+  // No error
+  NONE = 0;
+  // Check metrics.http_status_code
+  CHECK_RESPONSE_CODE = 1;
+  // The request could not be made
+  INVALID_REQUEST = 2;
+  // The request timed out
+  TIMEOUT = 3;
+}
+
+// Information about a single scrape operation (a single page request)
+message ScrapeMetrics {
+  // The total number of bytes downloaded during a single scrape
+  int32 response_size_bytes = 1;
+  // The status code from the main request
+  int32 http_status_code = 2;
+  // The number of URLs in the found_urls list
+  int32 num_found_urls = 3;
+  // How long this individual scrape took to execute
+  int32 scrape_duration_ms = 4;
+}
+
+// Information from scraping a single URL
+message ScrapeInformation {
+  // The agent that scraped
+  int32 agent_id = 1;
+  // The URL scraped
+  string scraped_url = 2;
+  // The URLs found on the page
+  repeated string found_urls = 3;
+  // Metrics from the scape
+  ScrapeMetrics metrics = 4;
+  // If there was an error
+  URLRequestErrorCode error = 5;
+}
+
+// Register an agent with the controller
+message RegisterAgentRequest {
+  // The version of nomad the agent is using
+  int64 nomad_version = 1;
+}
+
+// Information for an agent requesting to be registered
+message RegisterAgentResponse {
+  // A unique ID for the agent assigned by the controller
+  int32 agent_id = 1;
+  // The initial config for the agent to use
+  AgentConfigUpdate config = 2;
+  // If true, agent is wrong version and will not be registered
+  bool version_mismatch = 3;
+}

@@ -172,6 +172,7 @@ dist
 /*.json
 /*.dot
 
-/graphology-frontend/*.json
+/nomad-frontend/*.json
 
 config.yaml
+thoughts.md

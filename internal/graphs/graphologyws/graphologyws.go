@@ -13,7 +13,7 @@ import (
 )
 
 // GraphologyWs defines a WebsocketGraphProvider that renders Graphology data for
-// graphology-frontend as JSON and streams it over a websocket.
+// nomad-frontend as JSON and streams it over a websocket.
 type GraphologyWs struct {
 	mu     *sync.Mutex
 	hasher *StrHasher

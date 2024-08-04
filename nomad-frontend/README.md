@@ -1,4 +1,4 @@
-# Nomad Graphology Frontend
+# Nomad Frontend
 
 An interactive frontend for Nomad's graphology data built using [Sigma.js](https://www.sigmajs.org/)
 
