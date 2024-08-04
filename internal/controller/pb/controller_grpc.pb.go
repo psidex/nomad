@@ -28,7 +28,7 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type ControllerClient interface {
 	// A bi-directional stream for scraping
-	Scrape(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[ScrapeStreamMessage, ScrapeStreamMessage], error)
+	Scrape(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[ScrapeInformation, ControllerInstruction], error)
 	// Register an agent with this controller
 	RegisterAgent(ctx context.Context, in *RegisterAgentRequest, opts ...grpc.CallOption) (*RegisterAgentResponse, error)
 }
@@ -41,18 +41,18 @@ func NewControllerClient(cc grpc.ClientConnInterface) ControllerClient {
 	return &controllerClient{cc}
 }
 
-func (c *controllerClient) Scrape(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[ScrapeStreamMessage, ScrapeStreamMessage], error) {
+func (c *controllerClient) Scrape(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[ScrapeInformation, ControllerInstruction], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	stream, err := c.cc.NewStream(ctx, &Controller_ServiceDesc.Streams[0], Controller_Scrape_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
-	x := &grpc.GenericClientStream[ScrapeStreamMessage, ScrapeStreamMessage]{ClientStream: stream}
+	x := &grpc.GenericClientStream[ScrapeInformation, ControllerInstruction]{ClientStream: stream}
 	return x, nil
 }
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type Controller_ScrapeClient = grpc.BidiStreamingClient[ScrapeStreamMessage, ScrapeStreamMessage]
+type Controller_ScrapeClient = grpc.BidiStreamingClient[ScrapeInformation, ControllerInstruction]
 
 func (c *controllerClient) RegisterAgent(ctx context.Context, in *RegisterAgentRequest, opts ...grpc.CallOption) (*RegisterAgentResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
@@ -69,7 +69,7 @@ func (c *controllerClient) RegisterAgent(ctx context.Context, in *RegisterAgentR
 // for forward compatibility.
 type ControllerServer interface {
 	// A bi-directional stream for scraping
-	Scrape(grpc.BidiStreamingServer[ScrapeStreamMessage, ScrapeStreamMessage]) error
+	Scrape(grpc.BidiStreamingServer[ScrapeInformation, ControllerInstruction]) error
 	// Register an agent with this controller
 	RegisterAgent(context.Context, *RegisterAgentRequest) (*RegisterAgentResponse, error)
 	mustEmbedUnimplementedControllerServer()
@@ -82,7 +82,7 @@ type ControllerServer interface {
 // pointer dereference when methods are called.
 type UnimplementedControllerServer struct{}
 
-func (UnimplementedControllerServer) Scrape(grpc.BidiStreamingServer[ScrapeStreamMessage, ScrapeStreamMessage]) error {
+func (UnimplementedControllerServer) Scrape(grpc.BidiStreamingServer[ScrapeInformation, ControllerInstruction]) error {
 	return status.Errorf(codes.Unimplemented, "method Scrape not implemented")
 }
 func (UnimplementedControllerServer) RegisterAgent(context.Context, *RegisterAgentRequest) (*RegisterAgentResponse, error) {
@@ -110,11 +110,11 @@ func RegisterControllerServer(s grpc.ServiceRegistrar, srv ControllerServer) {
 }
 
 func _Controller_Scrape_Handler(srv interface{}, stream grpc.ServerStream) error {
-	return srv.(ControllerServer).Scrape(&grpc.GenericServerStream[ScrapeStreamMessage, ScrapeStreamMessage]{ServerStream: stream})
+	return srv.(ControllerServer).Scrape(&grpc.GenericServerStream[ScrapeInformation, ControllerInstruction]{ServerStream: stream})
 }
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type Controller_ScrapeServer = grpc.BidiStreamingServer[ScrapeStreamMessage, ScrapeStreamMessage]
+type Controller_ScrapeServer = grpc.BidiStreamingServer[ScrapeInformation, ControllerInstruction]
 
 func _Controller_RegisterAgent_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(RegisterAgentRequest)

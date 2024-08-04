@@ -98,7 +98,7 @@ func main() {
 	}
 
 	switch msg := resp.Message.(type) {
-	case *pb.ScrapeStreamMessage_ScrapeInstruction:
+	case *pb.ControllerInstruction_ScrapeInstruction:
 		log.Printf("Got urls to scrape: %+v", msg.ScrapeInstruction.Urls)
 
 		// for _, url := range msg.ScrapeInstruction.Urls {
@@ -111,16 +111,12 @@ func main() {
 			ScrapeDurationMs:  150,
 		}
 
-		scrapeRequest := &pb.ScrapeStreamMessage{
-			Message: &pb.ScrapeStreamMessage_ScrapeInformation{
-				ScrapeInformation: &pb.ScrapeInformation{
-					AgentId:    agentResp.AgentId,
-					ScrapedUrl: "scrapedurl",
-					FoundUrls:  []string{"https://example.com/page1", "https://example.com/page2"}, // Example values
-					Metrics:    metrics,
-					Error:      pb.URLRequestErrorCode_NONE,
-				},
-			},
+		scrapeRequest := &pb.ScrapeInformation{
+			AgentId:    agentResp.AgentId,
+			ScrapedUrl: "scrapedurl",
+			FoundUrls:  []string{"https://example.com/page1", "https://example.com/page2"}, // Example values
+			Metrics:    metrics,
+			Error:      pb.URLRequestErrorCode_NONE,
 		}
 
 		log.Println("Sending scrapeRequest as response")
@@ -130,7 +126,7 @@ func main() {
 		}
 		// }
 
-	case *pb.ScrapeStreamMessage_ConfigUpdate:
+	case *pb.ControllerInstruction_ConfigUpdate:
 		log.Printf("Received new configuration: %+v", msg.ConfigUpdate)
 
 	default:

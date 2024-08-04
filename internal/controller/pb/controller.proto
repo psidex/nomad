@@ -6,20 +6,16 @@ package pb;
 
 service Controller {
   // A bi-directional stream for scraping
-  rpc Scrape(stream ScrapeStreamMessage) returns (stream ScrapeStreamMessage);
+  rpc Scrape(stream ScrapeInformation) returns (stream ControllerInstruction);
   // Register an agent with this controller
   rpc RegisterAgent(RegisterAgentRequest) returns (RegisterAgentResponse);
 }
 
-// Message for the bi-directional stream
-message ScrapeStreamMessage {
+// An instruction from the controller for an agent
+message ControllerInstruction {
   oneof message {
-    // Should only be sent by the controller to an agent
     ScrapeInstruction scrape_instruction = 1;
-    // Should only be sent by the controller to an agent
     AgentConfigUpdate config_update = 2;
-    // Should only be sent by an agent to the controller
-    ScrapeInformation scrape_information = 3;
   }
 }
 

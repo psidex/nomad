@@ -33,8 +33,8 @@ func (s *server) Scrape(srv pb.Controller_ScrapeServer) error {
 		default:
 		}
 
-		resp := pb.ScrapeStreamMessage{
-			Message: &pb.ScrapeStreamMessage_ScrapeInstruction{
+		resp := pb.ControllerInstruction{
+			Message: &pb.ControllerInstruction_ScrapeInstruction{
 				ScrapeInstruction: &pb.ScrapeInstruction{Urls: []string{"test"}},
 			},
 		}
