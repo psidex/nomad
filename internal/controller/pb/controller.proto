@@ -15,7 +15,7 @@ service Controller {
 message ControllerInstruction {
   oneof message {
     ScrapeInstruction scrape_instruction = 1;
-    AgentConfigUpdate config_update = 2;
+    AgentConfig config_update = 2;
   }
 }
 
@@ -26,7 +26,7 @@ message ScrapeInstruction {
 }
 
 // Configuration update for the agent
-message AgentConfigUpdate {
+message AgentConfig {
   // The timeout the agent should use for each single scrape
   int32 single_scrape_timeout_ms = 1;
 }
@@ -35,24 +35,20 @@ message AgentConfigUpdate {
 enum URLRequestErrorCode {
   // No error
   NONE = 0;
-  // Check metrics.http_status_code
-  CHECK_RESPONSE_CODE = 1;
   // The request could not be made
-  INVALID_REQUEST = 2;
+  INVALID_REQUEST = 1;
   // The request timed out
-  TIMEOUT = 3;
+  TIMEOUT = 2;
 }
 
 // Information about a single scrape operation (a single page request)
 message ScrapeMetrics {
   // The total number of bytes downloaded during a single scrape
-  int32 response_size_bytes = 1;
-  // The status code from the main request
-  int32 http_status_code = 2;
+  int64 response_size_bytes = 1;
   // The number of URLs in the found_urls list
-  int32 num_found_urls = 3;
+  int32 num_found_urls = 2;
   // How long this individual scrape took to execute
-  int32 scrape_duration_ms = 4;
+  int32 scrape_duration_ms = 3;
 }
 
 // Information from scraping a single URL
@@ -80,7 +76,7 @@ message RegisterAgentResponse {
   // A unique ID for the agent assigned by the controller
   int32 agent_id = 1;
   // The initial config for the agent to use
-  AgentConfigUpdate config = 2;
+  AgentConfig config = 2;
   // If true, agent is wrong version and will not be registered
   bool version_mismatch = 3;
 }
