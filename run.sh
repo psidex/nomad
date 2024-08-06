@@ -27,9 +27,8 @@ function build() {
 }
 
 function test() {
-    docker run -d --name nomad-controller --network=nomadnet nomad-controller
-    sleep 1s
-    docker run --rm --network=nomadnet -e NOMAD_CONTROLLER_ADDRESS=nomad-controller nomad-agent
+    docker run --rm --network=nomadnet --name nomad-controller -d nomad-controller
+    docker run --rm --network=nomadnet --name nomad-agent nomad-agent
 }
 
 "$@"

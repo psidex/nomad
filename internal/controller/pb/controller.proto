@@ -23,11 +23,14 @@ message WorkerConfig {
   int32 single_scrape_timeout_ms = 2;
 }
 
+message Shutdown {}
+
 // An instruction from the controller for an agent
 message ControllerMessage {
   oneof message {
     ScrapeInstruction scrape_instruction = 1;
     WorkerConfig config_update = 2;
+    Shutdown shutdown = 3;
   }
 }
 

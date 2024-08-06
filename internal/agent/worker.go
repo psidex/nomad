@@ -80,7 +80,7 @@ func (w Worker) ScrapeSinglePage(urlToScrape string) *pb.ScrapedData {
 		log.Fatal(err)
 	}
 
-	urls := ExtractURLs(parsed, baseURL)
+	urls := extractURLs(parsed, baseURL)
 
 	duration := int32(time.Since(startTime).Milliseconds())
 

@@ -4,44 +4,48 @@ import (
 	"context"
 	"io"
 	"log"
+	"os"
 	"time"
+
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/psidex/nomad/internal/agent"
 	pb "github.com/psidex/nomad/internal/controller/pb"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 )
 
 const (
-	nomadVersion                 = 0
-	controllerAddress            = "nomad-controller:50051"
-	defaultSingleScrapeTimeoutMs = 10_000
-	gRPCCallTimeout              = time.Second * 10
+	nomadVersion            int64 = 0
+	reconnectSleep                = time.Second * 3
+	streamErrCountThreshold       = 5
 )
 
-func main() {
-	// TODO: An outer loop that reconnects to controller when disconnected, add a
-	// "shutdown" command in the stream to allow graceful shutdown
-
-	log.Printf("Connecting to controller at address: %s", controllerAddress)
-	conn, err := grpc.NewClient(controllerAddress, grpc.WithTransportCredentials(insecure.NewCredentials()))
+// run returns true/false to indicate if it should be called again (for reconnecting)
+func run(addr string) bool {
+	log.Printf("Connecting to controller at address: %s", addr)
+	conn, err := grpc.NewClient(
+		addr,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
 	if err != nil {
-		log.Fatalf("Could not connect to controller: %s", err)
+		log.Printf("Could not connect to controller: %s", err)
+		return true
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	controller := pb.NewControllerClient(conn)
-
 	worker := agent.Worker{}
 
 	log.Println("Initiating worker stream with controller")
 	stream, err := controller.WorkerStream(context.Background())
 	if err != nil {
-		log.Fatalf("Create worker stream error: %s", err)
+		log.Printf("Error creating worker stream: %s", err)
+		return true
 	}
+	defer func() { _ = stream.CloseSend() }()
 
 	log.Println("Handshaking with controller")
-	err = stream.Send(
+	if err = stream.Send(
 		&pb.WorkerMessage{
 			Message: &pb.WorkerMessage_Handshake{
 				Handshake: &pb.WorkerHandshake{
@@ -49,17 +53,25 @@ func main() {
 				},
 			},
 		},
-	)
-	if err != nil {
-		log.Fatalf("Failed to handshake with controller: %s", err)
+	); err != nil {
+		log.Printf("Failed to handshake with controller: %s", err)
+		return true
 	}
 
+	streamErrCount := 0
+
+mainLoop:
 	for {
+		if streamErrCount >= streamErrCountThreshold {
+			return true
+		}
+
 		var resp *pb.ControllerMessage
 		resp, err = stream.Recv()
 		if err == io.EOF || err != nil {
 			log.Printf("Received err from worker stream: %s", err)
-			break
+			streamErrCount++
+			continue
 		}
 
 		switch msg := resp.Message.(type) {
@@ -75,7 +87,9 @@ func main() {
 				}
 
 				if err := stream.Send(resp); err != nil {
-					log.Fatalf("Failed to send on worker stream: %s", err)
+					log.Printf("Failed to send on worker stream: %s", err)
+					streamErrCount++
+					continue mainLoop
 				}
 			}
 
@@ -84,14 +98,29 @@ func main() {
 			worker.Id = msg.ConfigUpdate.WorkerId
 			worker.Cfg = msg.ConfigUpdate
 
+		case *pb.ControllerMessage_Shutdown:
+			log.Println("Received shutdown from controller:")
+			return false
+
 		default:
-			log.Fatalf("Received unknown message type from controller")
+			log.Printf("Received unknown message type from controller")
+			// Something has probably gone quite wrong, don't try to reconnect
+			return false
 		}
 	}
+}
 
-	if err := stream.CloseSend(); err != nil {
-		log.Printf("Failed to close worker stream: %s", err)
+func main() {
+	controllerAddress := "nomad-controller:50051"
+	if addr := os.Getenv("NOMAD_CONTROLLER_ADDRESS"); addr != "" {
+		controllerAddress = addr
 	}
-
-	log.Println("Done, goodbye")
+	for {
+		if run(controllerAddress) {
+			time.Sleep(reconnectSleep)
+			continue
+		}
+		break
+	}
+	log.Println("Stopped")
 }

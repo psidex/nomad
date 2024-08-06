@@ -6,8 +6,8 @@ import (
 	"golang.org/x/net/html"
 )
 
-// ExtractURLs gets all hrefs from all <a> tags in a html document as absolute URLs.
-func ExtractURLs(n *html.Node, baseURL *url.URL) []string {
+// extractURLs gets all hrefs from all <a> tags in a html document as absolute URLs.
+func extractURLs(n *html.Node, baseURL *url.URL) []string {
 	var urls []string
 
 	var visitNode func(*html.Node)

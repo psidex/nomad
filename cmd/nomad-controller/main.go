@@ -4,6 +4,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"os"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -13,8 +14,7 @@ import (
 )
 
 const (
-	nomadVersion = 0
-	address      = "0.0.0.0:50051"
+	nomadVersion int64 = 0
 )
 
 type server struct {
@@ -101,11 +101,18 @@ func (s *server) WorkerStream(srv pb.Controller_WorkerStreamServer) error {
 		break
 	}
 
+	// TODO: Send shutdown message
+
 	log.Printf("[%d] Debug: scrape function end", workerId)
 	return nil
 }
 
 func main() {
+	address := "0.0.0.0:50051"
+	if addr := os.Getenv("NOMAD_CONTROLLER_BIND_ADDRESS"); addr != "" {
+		address = addr
+	}
+
 	log.Printf("Starting controller, listening on address: %s", address)
 
 	lis, err := net.Listen("tcp", address)
