@@ -5,18 +5,8 @@ option go_package = "github.com/psidex/nomad/internal/controller/pb";
 package pb;
 
 service Controller {
-  // A bi-directional stream for scraping
-  rpc Scrape(stream ScrapeInformation) returns (stream ControllerInstruction);
-  // Register an agent with this controller
-  rpc RegisterAgent(RegisterAgentRequest) returns (RegisterAgentResponse);
-}
-
-// An instruction from the controller for an agent
-message ControllerInstruction {
-  oneof message {
-    ScrapeInstruction scrape_instruction = 1;
-    AgentConfig config_update = 2;
-  }
+  // A bi-directional stream for controller<->worker communication
+  rpc WorkerStream(stream WorkerMessage) returns (stream ControllerMessage);
 }
 
 // An instruction from the controller to agent of what to scrape
@@ -25,25 +15,30 @@ message ScrapeInstruction {
   repeated string urls = 1;
 }
 
-// Configuration update for the agent
-message AgentConfig {
-  // The timeout the agent should use for each single scrape
-  int32 single_scrape_timeout_ms = 1;
+// Configuration update for workers
+message WorkerConfig {
+  // A unique ID for the worker assigned by the controller
+  int32 worker_id = 1;
+  // The timeout the agent should use for each single page scrape operation
+  int32 single_scrape_timeout_ms = 2;
 }
 
-// If not NONE, the reason for a scrape failure
-enum URLRequestErrorCode {
-  // No error
-  NONE = 0;
-  // The request could not be made
-  INVALID_REQUEST = 1;
-  // The request timed out
-  TIMEOUT = 2;
+// An instruction from the controller for an agent
+message ControllerMessage {
+  oneof message {
+    ScrapeInstruction scrape_instruction = 1;
+    WorkerConfig config_update = 2;
+  }
 }
 
-// Information about a single scrape operation (a single page request)
+message WorkerHandshake {
+  // The version of nomad the agent is using
+  int64 nomad_version = 1;
+}
+
+// Information about a single page scrape operation
 message ScrapeMetrics {
-  // The total number of bytes downloaded during a single scrape
+  // The total number of bytes downloaded during the operation
   int64 response_size_bytes = 1;
   // The number of URLs in the found_urls list
   int32 num_found_urls = 2;
@@ -51,8 +46,18 @@ message ScrapeMetrics {
   int32 scrape_duration_ms = 3;
 }
 
+// If not NONE, the reason for a scrape failure
+enum ScrapeError {
+  // No error
+  NONE = 0;
+  // The request could not be made
+  INVALID_REQUEST = 1;
+  // The scrape timed out
+  TIMEOUT = 2;
+}
+
 // Information from scraping a single URL
-message ScrapeInformation {
+message ScrapedData {
   // The agent that scraped
   int32 agent_id = 1;
   // The URL scraped
@@ -62,21 +67,12 @@ message ScrapeInformation {
   // Metrics from the scape
   ScrapeMetrics metrics = 4;
   // If there was an error
-  URLRequestErrorCode error = 5;
+  ScrapeError error = 5;
 }
 
-// Register an agent with the controller
-message RegisterAgentRequest {
-  // The version of nomad the agent is using
-  int64 nomad_version = 1;
-}
-
-// Information for an agent requesting to be registered
-message RegisterAgentResponse {
-  // A unique ID for the agent assigned by the controller
-  int32 agent_id = 1;
-  // The initial config for the agent to use
-  AgentConfig config = 2;
-  // If true, agent is wrong version and will not be registered
-  bool version_mismatch = 3;
+message WorkerMessage {
+  oneof message {
+    WorkerHandshake handshake = 1;
+    ScrapedData data = 2;
+  }
 }

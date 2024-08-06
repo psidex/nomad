@@ -17,19 +17,15 @@ import (
 )
 
 type Worker struct {
-	id  int32
-	cfg *pb.AgentConfig
+	Id  int32
+	Cfg *pb.WorkerConfig
 }
 
-func NewWorker(id int32, cfg *pb.AgentConfig) *Worker {
-	return &Worker{id, cfg}
+func NewWorker() *Worker {
+	return &Worker{}
 }
 
-func (w *Worker) SetCfg(cfg *pb.AgentConfig) {
-	w.cfg = cfg
-}
-
-func (w Worker) ScrapeSinglePage(urlToScrape string) *pb.ScrapeInformation {
+func (w Worker) ScrapeSinglePage(urlToScrape string) *pb.ScrapedData {
 	// Time how long our scrape operation takes
 	startTime := time.Now()
 
@@ -37,7 +33,7 @@ func (w Worker) ScrapeSinglePage(urlToScrape string) *pb.ScrapeInformation {
 	// Create context an ensure any long running Chrome tasks are cancelled when we exit
 	timeoutCtx, timeoutCancel := context.WithTimeout(
 		context.Background(),
-		time.Millisecond*time.Duration(w.cfg.SingleScrapeTimeoutMs),
+		time.Millisecond*time.Duration(w.Cfg.SingleScrapeTimeoutMs),
 	)
 	defer timeoutCancel()
 
@@ -94,11 +90,11 @@ func (w Worker) ScrapeSinglePage(urlToScrape string) *pb.ScrapeInformation {
 		ScrapeDurationMs:  duration,
 	}
 
-	return &pb.ScrapeInformation{
-		AgentId:    w.id,
+	return &pb.ScrapedData{
+		AgentId:    w.Id,
 		ScrapedUrl: urlToScrape,
 		FoundUrls:  urls,
 		Metrics:    metrics,
-		Error:      pb.URLRequestErrorCode_NONE,
+		Error:      pb.ScrapeError_NONE,
 	}
 }

@@ -32,58 +32,65 @@ func main() {
 
 	controller := pb.NewControllerClient(conn)
 
-	log.Println("Registering agent with controller")
-	ctx, cancel := context.WithTimeout(context.Background(), gRPCCallTimeout)
-	defer cancel()
-	agentResp, err := controller.RegisterAgent(ctx, &pb.RegisterAgentRequest{NomadVersion: nomadVersion})
+	worker := agent.Worker{}
+
+	log.Println("Initiating worker stream with controller")
+	stream, err := controller.WorkerStream(context.Background())
 	if err != nil {
-		log.Fatalf("Could not register agent: %s", err)
-	}
-	if agentResp.VersionMismatch {
-		log.Fatal("Received version mismatch from controller")
+		log.Fatalf("Create worker stream error: %s", err)
 	}
 
-	log.Printf("Received agent ID from controller: %d", agentResp.AgentId)
-	log.Printf("Received agent config from controller: %+v", agentResp.Config)
-	worker := agent.NewWorker(agentResp.AgentId, agentResp.Config)
-
-	log.Println("Initiating scrape stream with controller")
-	scrapeStream, err := controller.Scrape(context.Background())
+	log.Println("Handshaking with controller")
+	err = stream.Send(
+		&pb.WorkerMessage{
+			Message: &pb.WorkerMessage_Handshake{
+				Handshake: &pb.WorkerHandshake{
+					NomadVersion: nomadVersion,
+				},
+			},
+		},
+	)
 	if err != nil {
-		log.Fatalf("Create scrape stream error: %s", err)
+		log.Fatalf("Failed to handshake with controller: %s", err)
 	}
 
-	log.Println("Starting work loop")
 	for {
-		var resp *pb.ControllerInstruction
-		resp, err = scrapeStream.Recv()
+		var resp *pb.ControllerMessage
+		resp, err = stream.Recv()
 		if err == io.EOF || err != nil {
-			log.Printf("Received err from scrape stream: %s", err)
+			log.Printf("Received err from worker stream: %s", err)
 			break
 		}
 
 		switch msg := resp.Message.(type) {
-		case *pb.ControllerInstruction_ScrapeInstruction:
+		case *pb.ControllerMessage_ScrapeInstruction:
 			for _, url := range msg.ScrapeInstruction.Urls {
 				log.Printf("Scraping URL: %s", url)
-				scrapeRequest := worker.ScrapeSinglePage(url)
-				if err := scrapeStream.Send(scrapeRequest); err != nil {
-					log.Fatalf("Failed to send on scrape stream: %s", err)
+
+				scrapedData := worker.ScrapeSinglePage(url)
+				resp := &pb.WorkerMessage{
+					Message: &pb.WorkerMessage_Data{
+						Data: scrapedData,
+					},
+				}
+
+				if err := stream.Send(resp); err != nil {
+					log.Fatalf("Failed to send on worker stream: %s", err)
 				}
 			}
 
-		case *pb.ControllerInstruction_ConfigUpdate:
-			log.Printf("Received agent config update from controller: %+v", msg.ConfigUpdate)
-			worker.SetCfg(msg.ConfigUpdate)
+		case *pb.ControllerMessage_ConfigUpdate:
+			log.Printf("Received worker config update: %+v", msg.ConfigUpdate)
+			worker.Id = msg.ConfigUpdate.WorkerId
+			worker.Cfg = msg.ConfigUpdate
 
 		default:
-			// TODO: Exit from loop here?
-			log.Printf("Received unknown message type from controller")
+			log.Fatalf("Received unknown message type from controller")
 		}
 	}
 
-	if err := scrapeStream.CloseSend(); err != nil {
-		log.Printf("Failed to close scrape stream: %s", err)
+	if err := stream.CloseSend(); err != nil {
+		log.Printf("Failed to close worker stream: %s", err)
 	}
 
 	log.Println("Done, goodbye")

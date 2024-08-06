@@ -26,4 +26,10 @@ function build() {
     buildcontroller
 }
 
+function test() {
+    docker run -d --name nomad-controller --network=nomadnet nomad-controller
+    sleep 1s
+    docker run --rm --network=nomadnet -e NOMAD_CONTROLLER_ADDRESS=nomad-controller nomad-agent
+}
+
 "$@"
