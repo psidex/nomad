@@ -5,8 +5,10 @@ import (
 	"io"
 	"log"
 	"os"
+	"os/signal"
 	"strconv"
 	"sync"
+	"syscall"
 	"time"
 
 	"google.golang.org/grpc"
@@ -33,7 +35,7 @@ const (
 )
 
 // worker returns true/false to indicate if it should be called again (for reconnecting)
-func worker(addr string) bool {
+func worker(ctx context.Context, addr string) bool {
 	log.Printf("Connecting to controller at address: %s", addr)
 	conn, err := grpc.NewClient(
 		addr,
@@ -75,6 +77,13 @@ func worker(addr string) bool {
 
 mainLoop:
 	for {
+		select {
+		case <-ctx.Done():
+			log.Println("Stopping: Context cancelled")
+			return false
+		default:
+		}
+
 		if streamErrCount >= streamErrCountThreshold {
 			log.Printf("Stream err count %d >= %d, abandoning connection", streamErrCount, streamErrCountThreshold)
 			return true
@@ -124,17 +133,21 @@ mainLoop:
 	}
 }
 
-func workerReconnectLoop(wg *sync.WaitGroup, controllerAddress string) {
-	// TODO: Worker ID alongside logs
+func workerReconnectLoop(ctx context.Context, wg *sync.WaitGroup, controllerAddress string) {
+	defer wg.Done()
 	log.Println("Worker starting")
 	for {
-		if !worker(controllerAddress) {
+		if !worker(ctx, controllerAddress) {
 			break
 		}
 		log.Printf("Worker reconnecting in %s...", reconnectSleep)
-		time.Sleep(reconnectSleep)
+		select {
+		case <-ctx.Done():
+			log.Println("Worker stopping due to context cancellation")
+			return
+		case <-time.After(reconnectSleep):
+		}
 	}
-	wg.Done()
 	log.Println("Worker stopped")
 }
 
@@ -156,15 +169,22 @@ func main() {
 	}
 
 	log.Printf("Configured worker count: %d", workerCount)
-	goRoutineCount := workerCount - 1
+
+	ctx, cancel := context.WithCancel(context.Background())
 
 	wg := &sync.WaitGroup{}
-	wg.Add(goRoutineCount)
+	wg.Add(workerCount)
 
-	for i := 0; i < goRoutineCount; i++ {
-		go workerReconnectLoop(wg, controllerAddress)
+	for i := 0; i < workerCount; i++ {
+		go workerReconnectLoop(ctx, wg, controllerAddress)
 	}
-	workerReconnectLoop(wg, controllerAddress)
+
+	// Listen for interrupt signal to gracefully shut down
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	<-sigChan
+	log.Println("Agent shutting down")
+	cancel()
 
 	wg.Wait()
 	log.Println("Agent stopped")
