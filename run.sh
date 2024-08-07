@@ -27,7 +27,7 @@ function build() {
 }
 
 function test() {
-    docker run --rm --network=nomadnet --name nomad-controller -d nomad-controller
+    docker run --rm --network=nomadnet --name nomad-controller -d -p 127.0.0.1:8080:8080 nomad-controller
     docker run --rm --network=nomadnet --name nomad-agent nomad-agent
 }
 

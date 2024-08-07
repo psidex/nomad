@@ -2,7 +2,7 @@ package agent
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"net/url"
 	"strings"
 	"time"
@@ -67,17 +67,20 @@ func (w Worker) ScrapeSinglePage(urlToScrape string) *pb.ScrapedData {
 		}),
 	)
 	if err != nil {
-		log.Fatal(err)
+		slog.Info("Failed running chromedp.Run", "urlToScrape", urlToScrape, "err", err)
+		return nil
 	}
 
 	baseURL, err := url.Parse(urlToScrape)
 	if err != nil {
-		log.Fatal(err)
+		slog.Info("Failed running url.Parse", "urlToScrape", urlToScrape, "err", err)
+		return nil
 	}
 
 	parsed, err := html.Parse(strings.NewReader(pageSource))
 	if err != nil {
-		log.Fatal(err)
+		slog.Info("Failed running html.Parse", "urlToScrape", urlToScrape, "err", err)
+		return nil
 	}
 
 	urls := extractURLs(parsed, baseURL)

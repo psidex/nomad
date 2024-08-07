@@ -1,4 +1,4 @@
-package nomad
+package controller
 
 import (
 	"net/url"

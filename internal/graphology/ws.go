@@ -1,4 +1,4 @@
-package graphologyws
+package graphology
 
 import (
 	"log"
@@ -7,7 +7,6 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	"github.com/psidex/nomad/internal/graphs"
 	"github.com/psidex/nomad/internal/lib"
 	. "github.com/psidex/nomad/internal/lib"
 )
@@ -23,8 +22,6 @@ type GraphologyWs struct {
 	seenEdges Set
 	edgeCount int
 }
-
-var _ graphs.WebsocketGraphProvider = (*GraphologyWs)(nil)
 
 // All of the websocket messages sent by GraphologyWs will be text.
 var t = websocket.TextMessage

@@ -15,15 +15,15 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
+	"github.com/psidex/nomad/internal/lib"
+
 	"github.com/psidex/nomad/internal/agent"
 	pb "github.com/psidex/nomad/internal/controller/pb"
-	"github.com/psidex/nomad/internal/lib"
 )
 
-const (
-	// Should always match the controller version
-	nomadVersion int64 = 0
+// TODO: Have basic http / chromedp switch
 
+const (
 	// How long to wait between trying to reconnect to the controller
 	reconnectSleep = time.Second * 3
 
@@ -68,7 +68,7 @@ func worker(ctx context.Context, addr string) bool {
 		&pb.WorkerMessage{
 			Message: &pb.WorkerMessage_Handshake{
 				Handshake: &pb.WorkerHandshake{
-					NomadVersion: nomadVersion,
+					NomadVersion: lib.NomadVersion,
 				},
 			},
 		},
@@ -108,6 +108,10 @@ mainLoop:
 				slog.Info("Scraping URL", "url", url)
 
 				scrapedData := worker.ScrapeSinglePage(url)
+				if scrapedData == nil {
+					continue
+				}
+
 				resp := &pb.WorkerMessage{
 					Message: &pb.WorkerMessage_Data{
 						Data: scrapedData,

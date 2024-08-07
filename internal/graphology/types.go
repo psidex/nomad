@@ -1,4 +1,4 @@
-package graphologyws
+package graphology
 
 import (
 	"fmt"
