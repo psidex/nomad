@@ -17,6 +17,7 @@ import (
 
 	"github.com/psidex/nomad/internal/agent"
 	pb "github.com/psidex/nomad/internal/controller/pb"
+	"github.com/psidex/nomad/internal/lib"
 )
 
 const (
@@ -29,6 +30,8 @@ const (
 	// How many times the worker stream send/recv can error before abandoning
 	streamErrCountThreshold = 5
 
+	// Default logging level, set using NOMAD_LOG_LEVEL
+	defaultLogLevel = slog.LevelDebug
 	// Default controller address, set using NOMAD_CONTROLLER_ADDRESS
 	defaultControllerAddress = "nomad-controller:50051"
 	// Default worker count, set using NOMAD_AGENT_WORKER_COUNT
@@ -145,6 +148,7 @@ func workerReconnectLoop(ctx context.Context, wg *sync.WaitGroup, controllerAddr
 		slog.Info("Worker reconnecting", "waitDuration", reconnectSleep)
 		select {
 		case <-ctx.Done():
+			// We check the ctx here as well as we could be in a recconnect loop
 			slog.Info("Worker stopping due to context cancellation")
 			return
 		case <-time.After(reconnectSleep):
@@ -154,6 +158,17 @@ func workerReconnectLoop(ctx context.Context, wg *sync.WaitGroup, controllerAddr
 }
 
 func main() {
+	logLevel := defaultLogLevel
+	if level := os.Getenv("NOMAD_LOG_LEVEL"); level != "" {
+		var err error
+		logLevel, err = lib.ParseSLogLevel(level)
+		if err != nil {
+			slog.Error("Invalid value for NOMAD_LOG_LEVEL", "value", level, "error", err)
+			return
+		}
+	}
+
+	slog.SetLogLoggerLevel(logLevel)
 	slog.Info("Agent starting")
 
 	controllerAddress := defaultControllerAddress
@@ -173,22 +188,32 @@ func main() {
 
 	slog.Info("Configured worker count", "count", workerCount)
 
-	ctx, cancel := context.WithCancel(context.Background())
+	workersCtx, stopWorkers := context.WithCancel(context.Background())
 
 	wg := &sync.WaitGroup{}
 	wg.Add(workerCount)
 
 	for i := 0; i < workerCount; i++ {
-		go workerReconnectLoop(ctx, wg, controllerAddress)
+		go workerReconnectLoop(workersCtx, wg, controllerAddress)
 	}
 
-	// Listen for interrupt signal to gracefully shut down
+	wgFinishedChan := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(wgFinishedChan)
+	}()
+
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-	<-sigChan
-	slog.Info("Process received SIGINT/SIGTERM, shutting down")
-	cancel()
 
-	wg.Wait()
+	select {
+	case <-sigChan:
+		slog.Info("Process received SIGINT/SIGTERM, shutting down")
+		stopWorkers()
+		wg.Wait()
+	case <-wgFinishedChan:
+		slog.Info("All workers stopped, shutting down")
+	}
+
 	slog.Info("Agent stopped")
 }

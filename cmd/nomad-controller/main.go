@@ -12,12 +12,15 @@ import (
 	"google.golang.org/grpc/status"
 
 	pb "github.com/psidex/nomad/internal/controller/pb"
+	"github.com/psidex/nomad/internal/lib"
 )
 
 const (
 	// Should always match the controller version
 	nomadVersion int64 = 0
 
+	// Default logging level, set using NOMAD_LOG_LEVEL
+	defaultLogLevel = slog.LevelDebug
 	// Default controller address, set using NOMAD_CONTROLLER_ADDRESS
 	defaultControllerAddress = "nomad-controller:50051"
 )
@@ -117,12 +120,25 @@ func (s *server) WorkerStream(srv pb.Controller_WorkerStreamServer) error {
 }
 
 func main() {
+	logLevel := defaultLogLevel
+	if level := os.Getenv("NOMAD_LOG_LEVEL"); level != "" {
+		var err error
+		logLevel, err = lib.ParseSLogLevel(level)
+		if err != nil {
+			slog.Error("Invalid value for NOMAD_LOG_LEVEL", "value", level, "error", err)
+			return
+		}
+	}
+
+	slog.SetLogLoggerLevel(logLevel)
+	slog.Info("Starting controller")
+
 	address := defaultControllerAddress
 	if addr := os.Getenv("NOMAD_CONTROLLER_BIND_ADDRESS"); addr != "" {
 		address = addr
 	}
 
-	slog.Info("Starting controller", slog.String("address", address))
+	slog.Info("Bind address configured", "address", address)
 
 	lis, err := net.Listen("tcp", address)
 	if err != nil {
