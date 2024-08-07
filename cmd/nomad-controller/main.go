@@ -14,7 +14,11 @@ import (
 )
 
 const (
+	// Should always match the controller version
 	nomadVersion int64 = 0
+
+	// Default controller address, set using NOMAD_CONTROLLER_ADDRESS
+	defaultControllerAddress = "nomad-controller:50051"
 )
 
 type server struct {
@@ -108,7 +112,7 @@ func (s *server) WorkerStream(srv pb.Controller_WorkerStreamServer) error {
 }
 
 func main() {
-	address := "0.0.0.0:50051"
+	address := defaultControllerAddress
 	if addr := os.Getenv("NOMAD_CONTROLLER_BIND_ADDRESS"); addr != "" {
 		address = addr
 	}
