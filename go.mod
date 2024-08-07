@@ -8,6 +8,7 @@ require (
 	github.com/corpix/uarand v0.2.0
 	github.com/go-echarts/go-echarts/v2 v2.4.1
 	github.com/gorilla/websocket v1.5.3
+	golang.org/x/exp v0.0.0-20240719175910-8a7402abbf56
 	golang.org/x/net v0.27.0
 	google.golang.org/grpc v1.65.0
 	google.golang.org/protobuf v1.34.2
