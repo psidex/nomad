@@ -10,7 +10,7 @@ import (
 	"syscall"
 	"time"
 
-	"golang.org/x/exp/slog"
+	"log/slog"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"

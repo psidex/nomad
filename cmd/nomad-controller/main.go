@@ -2,9 +2,10 @@ package main
 
 import (
 	"io"
-	"log"
 	"net"
 	"os"
+
+	"log/slog"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -32,18 +33,18 @@ func (s *server) WorkerStream(srv pb.Controller_WorkerStreamServer) error {
 	// recv handshake
 	workerMessage, err := srv.Recv()
 	if err == io.EOF {
-		log.Println("Received EOF on unknown worker stream")
+		slog.Error("Received EOF on unknown worker stream")
 		return nil
 	}
 	if err != nil {
-		log.Printf("Received error on unknown worker stream: %s", err)
+		slog.Error("Received error on unknown worker stream", "error", err)
 		return nil
 	}
 
 	// Check if the received message is a handshake
 	handshake := workerMessage.GetHandshake()
 	if handshake == nil {
-		log.Println("Expected worker handshake message")
+		slog.Error("Did not receive expected worker handshake message", "workerMessage", workerMessage)
 		return nil
 	}
 
@@ -70,7 +71,7 @@ func (s *server) WorkerStream(srv pb.Controller_WorkerStreamServer) error {
 		},
 	})
 	if err != nil {
-		log.Printf("[%d] Failed to send worker config: %s", workerId, err)
+		slog.Error("Failed to send worker config", "workerId", workerId, "error", err)
 		return nil
 	}
 
@@ -88,26 +89,30 @@ func (s *server) WorkerStream(srv pb.Controller_WorkerStreamServer) error {
 			},
 		}
 		if err := srv.Send(&resp); err != nil {
-			log.Printf("[%d] Failed to send on worker stream: %s", workerId, err)
+			slog.Error("Failed to send on worker stream", "workerId", workerId, "error", err)
 		}
 
 		req, err := srv.Recv()
 		if err == io.EOF {
-			log.Printf("[%d] Received EOF on worker stream", workerId)
+			slog.Error("Received EOF on worker stream", "workerId", workerId)
 			break
 		}
 		if err != nil {
-			log.Printf("[%d] Received error on worker stream: %s", workerId, err)
+			slog.Error("Received error on worker stream", "workerId", workerId, "error", err)
 			continue
 		}
 
-		log.Printf("[%d] Debug: scrape loop end, recvd: %+v", workerId, req)
+		slog.Debug("Scrape loop end", "workerId", workerId, "request", req)
 		break
 	}
 
-	// TODO: Send shutdown message
+	if err := srv.Send(&pb.ControllerMessage{
+		Message: &pb.ControllerMessage_Shutdown{},
+	}); err != nil {
+		slog.Error("Failed to send shutdown message", "workerId", workerId, "error", err)
+	}
 
-	log.Printf("[%d] Debug: scrape function end", workerId)
+	slog.Debug("Scrape function end", "workerId", workerId)
 	return nil
 }
 
@@ -117,11 +122,12 @@ func main() {
 		address = addr
 	}
 
-	log.Printf("Starting controller, listening on address: %s", address)
+	slog.Info("Starting controller", slog.String("address", address))
 
 	lis, err := net.Listen("tcp", address)
 	if err != nil {
-		log.Fatalf("Failed to listen: %v", err)
+		slog.Error("Failed to listen", "error", err)
+		return
 	}
 
 	s := grpc.NewServer()
@@ -129,6 +135,6 @@ func main() {
 	pb.RegisterControllerServer(s, &server{})
 
 	if err := s.Serve(lis); err != nil {
-		log.Fatalf("Failed to serve: %v", err)
+		slog.Error("Failed to serve", "error", err)
 	}
 }
