@@ -35,6 +35,7 @@ type SessionConfig struct {
 
 type Server struct {
 	pb.UnimplementedControllerServer
+	logger *slog.Logger
 	// TODO: urlsToScrape batching using []string
 	urlsToScrape chan string
 	outputs      chan *pb.ScrapedData
@@ -49,8 +50,9 @@ func init() {
 	upgrader.CheckOrigin = func(r *http.Request) bool { return true }
 }
 
-func NewServer(randomCrawl bool) (*Server, error) {
+func NewServer(logger *slog.Logger, randomCrawl bool) (*Server, error) {
 	s := &Server{
+		logger:       logger,
 		urlsToScrape: make(chan string),
 		outputs:      make(chan *pb.ScrapedData),
 		workerCount:  0,
@@ -97,7 +99,7 @@ func (s *Server) Session(w http.ResponseWriter, r *http.Request) {
 
 	for {
 		work := <-s.outputs
-		slog.Debug("handle work loop got work", "work", work)
+		s.logger.Debug("handle work loop got work", "work", work)
 		if s.frontEnd != nil {
 			scrapedHostname, _ := getHostname(work.ScrapedUrl)
 
@@ -156,18 +158,18 @@ func (s *Server) WorkerStream(srv pb.Controller_WorkerStreamServer) error {
 	// recv handshake
 	workerMessage, err := srv.Recv()
 	if err == io.EOF {
-		slog.Error("Received EOF on unknown worker stream")
+		s.logger.Error("Received EOF on unknown worker stream")
 		return nil
 	}
 	if err != nil {
-		slog.Error("Received error on unknown worker stream", "error", err)
+		s.logger.Error("Received error on unknown worker stream", "error", err)
 		return nil
 	}
 
 	// Check if the received message is a handshake
 	handshake := workerMessage.GetHandshake()
 	if handshake == nil {
-		slog.Error("Did not receive expected worker handshake message", "workerMessage", workerMessage)
+		s.logger.Error("Did not receive expected worker handshake message", "workerMessage", workerMessage)
 		return nil
 	}
 
@@ -194,7 +196,7 @@ func (s *Server) WorkerStream(srv pb.Controller_WorkerStreamServer) error {
 		},
 	})
 	if err != nil {
-		slog.Error("Failed to send worker config", "workerId", workerId, "error", err)
+		s.logger.Error("Failed to send worker config", "workerId", workerId, "error", err)
 		return nil
 	}
 
@@ -202,13 +204,13 @@ func (s *Server) WorkerStream(srv pb.Controller_WorkerStreamServer) error {
 	for {
 		select {
 		case <-ctx.Done():
-			slog.Error("gRPC context is done", "err", ctx.Err().Error())
+			s.logger.Error("gRPC context is done", "err", ctx.Err().Error())
 			return ctx.Err()
 		default:
 		}
 
 		url := <-s.urlsToScrape
-		slog.Debug("Issuing URL to worker", "url", url)
+		s.logger.Debug("Issuing URL to worker", "url", url)
 
 		resp := pb.ControllerMessage{
 			Message: &pb.ControllerMessage_ScrapeInstruction{
@@ -216,23 +218,23 @@ func (s *Server) WorkerStream(srv pb.Controller_WorkerStreamServer) error {
 			},
 		}
 		if err := srv.Send(&resp); err != nil {
-			slog.Error("Failed to send on worker stream", "workerId", workerId, "error", err)
+			s.logger.Error("Failed to send on worker stream", "workerId", workerId, "error", err)
 		}
 
 		req, err := srv.Recv()
 		if err == io.EOF {
-			slog.Error("Received EOF on worker stream", "workerId", workerId)
+			s.logger.Error("Received EOF on worker stream", "workerId", workerId)
 			break
 		}
 		if err != nil {
-			slog.Error("Received error on worker stream", "workerId", workerId, "error", err)
+			s.logger.Error("Received error on worker stream", "workerId", workerId, "error", err)
 			continue
 		}
 
-		slog.Debug("Scrape loop end", "workerId", workerId, "request", req)
+		s.logger.Debug("Scrape loop end", "workerId", workerId, "request", req)
 		data := req.GetData()
 		if data == nil {
-			slog.Error("Received nil data from worker", "req", req)
+			s.logger.Error("Received nil data from worker", "req", req)
 		} else {
 			s.outputs <- data
 		}
@@ -241,9 +243,9 @@ func (s *Server) WorkerStream(srv pb.Controller_WorkerStreamServer) error {
 	if err := srv.Send(&pb.ControllerMessage{
 		Message: &pb.ControllerMessage_Shutdown{},
 	}); err != nil {
-		slog.Error("Failed to send shutdown message", "workerId", workerId, "error", err)
+		s.logger.Error("Failed to send shutdown message", "workerId", workerId, "error", err)
 	}
 
-	slog.Debug("Scrape function end", "workerId", workerId)
+	s.logger.Debug("Scrape function end", "workerId", workerId)
 	return nil
 }

@@ -21,7 +21,8 @@ import (
 	pb "github.com/psidex/nomad/internal/controller/pb"
 )
 
-// TODO: Have basic http / chromedp switch
+// TODO: Include build info (including git info) in compiled bin
+// TODO: Have basic http / chromedp switch?
 
 const (
 	// How long to wait between trying to reconnect to the controller
@@ -32,22 +33,28 @@ const (
 
 	// Default logging level, set using NOMAD_LOG_LEVEL
 	defaultLogLevel = slog.LevelDebug
-	// Default controller address, set using NOMAD_CONTROLLER_ADDRESS
+	// Default controller address, set using NOMAD_CONTROLLER_GRPC_ADDRESS
 	defaultControllerAddress = "nomad-controller:50051"
 	// Default worker count, set using NOMAD_AGENT_WORKER_COUNT
 	defaultWorkerCount = 1
 )
 
-// worker returns true/false to indicate if it should be called again (for reconnecting)
-func worker(ctx context.Context, addr string) bool {
-	slog.Info("Connecting to controller", "address", addr)
+type worker struct {
+	ctx    context.Context
+	logger *slog.Logger
+	addr   string
+}
+
+// work returns true/false to indicate if it should be called again (for reconnecting)
+func (w worker) work() bool {
+	w.logger.Info("Connecting to controller", "address", w.addr)
 
 	conn, err := grpc.NewClient(
-		addr,
+		w.addr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	)
 	if err != nil {
-		slog.Error("Could not connect to controller", "error", err)
+		w.logger.Error("Could not connect to controller", "error", err)
 		return true
 	}
 	defer func() { _ = conn.Close() }()
@@ -55,15 +62,15 @@ func worker(ctx context.Context, addr string) bool {
 	controller := pb.NewControllerClient(conn)
 	worker := agent.Worker{}
 
-	slog.Info("Initiating worker stream with controller")
+	w.logger.Info("Initiating worker stream with controller")
 	stream, err := controller.WorkerStream(context.Background())
 	if err != nil {
-		slog.Error("Error creating worker stream", "error", err)
+		w.logger.Error("Error creating worker stream", "error", err)
 		return true
 	}
 	defer func() { _ = stream.CloseSend() }()
 
-	slog.Info("Handshaking with controller")
+	w.logger.Info("Handshaking with controller")
 	if err = stream.Send(
 		&pb.WorkerMessage{
 			Message: &pb.WorkerMessage_Handshake{
@@ -73,7 +80,7 @@ func worker(ctx context.Context, addr string) bool {
 			},
 		},
 	); err != nil {
-		slog.Error("Failed to handshake with controller", "error", err)
+		w.logger.Error("Failed to handshake with controller", "error", err)
 		// If the handshake failed, the fix probably wont be a simple reconnect
 		return false
 	}
@@ -83,21 +90,21 @@ func worker(ctx context.Context, addr string) bool {
 mainLoop:
 	for {
 		select {
-		case <-ctx.Done():
-			slog.Info("Stopping: Context cancelled")
+		case <-w.ctx.Done():
+			w.logger.Info("Stopping: Context cancelled")
 			return false
 		default:
 		}
 
 		if streamErrCount >= streamErrCountThreshold {
-			slog.Warn("Stream error count threshold reached, abandoning connection", "streamErrCount", streamErrCount)
+			w.logger.Warn("Stream error count threshold reached, abandoning connection", "streamErrCount", streamErrCount)
 			return true
 		}
 
 		var resp *pb.ControllerMessage
 		resp, err = stream.Recv()
 		if err == io.EOF || err != nil {
-			slog.Error("Received error from worker stream", "error", err)
+			w.logger.Error("Received error from worker stream", "error", err)
 			streamErrCount++
 			continue
 		}
@@ -105,60 +112,60 @@ mainLoop:
 		switch msg := resp.Message.(type) {
 		case *pb.ControllerMessage_ScrapeInstruction:
 			for _, url := range msg.ScrapeInstruction.Urls {
-				slog.Info("Scraping URL", "url", url)
+				w.logger.Info("Scraping URL", "url", url)
 
 				scrapedData := worker.ScrapeSinglePage(url)
-				if scrapedData == nil {
-					continue
-				}
 
 				resp := &pb.WorkerMessage{
 					Message: &pb.WorkerMessage_Data{
-						Data: scrapedData,
+						Data: &scrapedData,
 					},
 				}
 
 				if err := stream.Send(resp); err != nil {
-					slog.Error("Failed to send on worker stream", "error", err)
+					w.logger.Error("Failed to send on worker stream", "error", err)
 					streamErrCount++
 					continue mainLoop
 				}
 			}
 
 		case *pb.ControllerMessage_ConfigUpdate:
-			slog.Info("Received worker config update", "config", msg.ConfigUpdate)
+			w.logger.Info("Received worker config update", "config", msg.ConfigUpdate)
 			worker.Id = msg.ConfigUpdate.WorkerId
 			worker.Cfg = msg.ConfigUpdate
 
 		case *pb.ControllerMessage_Shutdown:
-			slog.Info("Stopping: Received shutdown from controller")
+			w.logger.Info("Stopping: Received shutdown from controller")
 			return false
 
 		default:
-			slog.Error("Received unknown message type from controller", "message", resp)
+			w.logger.Error("Received unknown message type from controller", "message", resp)
 			// We probably shouldn't try to reconnect if the controller is doing this
 			return false
 		}
 	}
 }
 
-func workerReconnectLoop(ctx context.Context, wg *sync.WaitGroup, controllerAddress string) {
+func workerReconnectLoop(ctx context.Context, logger *slog.Logger, wg *sync.WaitGroup, controllerAddress string) {
 	defer wg.Done()
-	slog.Info("Worker starting")
+	logger.Info("Worker starting")
+
+	w := worker{ctx, logger, controllerAddress}
 	for {
-		if !worker(ctx, controllerAddress) {
+		if !w.work() {
 			break
 		}
-		slog.Info("Worker reconnecting", "waitDuration", reconnectSleep)
+		logger.Info("Worker reconnecting", "waitDuration", reconnectSleep)
 		select {
 		case <-ctx.Done():
 			// We check the ctx here as well as we could be in a recconnect loop
-			slog.Info("Worker stopping due to context cancellation")
+			logger.Info("Worker stopping due to context cancellation")
 			return
 		case <-time.After(reconnectSleep):
 		}
 	}
-	slog.Info("Worker stopped")
+
+	logger.Info("Worker stopped")
 }
 
 func main() {
@@ -172,11 +179,11 @@ func main() {
 		}
 	}
 
-	slog.SetLogLoggerLevel(logLevel)
-	slog.Info("Agent starting")
+	logger := lib.NiceLogger(os.Stdout, logLevel)
+	logger.Info("Agent starting")
 
 	controllerAddress := defaultControllerAddress
-	if addr := os.Getenv("NOMAD_CONTROLLER_ADDRESS"); addr != "" {
+	if addr := os.Getenv("NOMAD_CONTROLLER_GRPC_ADDRESS"); addr != "" {
 		controllerAddress = addr
 	}
 
@@ -185,12 +192,12 @@ func main() {
 		var err error
 		workerCount, err = strconv.Atoi(count)
 		if err != nil || workerCount <= 0 {
-			slog.Error("Invalid value for NOMAD_AGENT_WORKER_COUNT", "value", count, "error", err)
+			logger.Error("Invalid value for NOMAD_AGENT_WORKER_COUNT", "value", count, "error", err)
 			return
 		}
 	}
 
-	slog.Info("Configured worker count", "count", workerCount)
+	logger.Info("Configured worker count", "count", workerCount)
 
 	workersCtx, stopWorkers := context.WithCancel(context.Background())
 
@@ -198,7 +205,7 @@ func main() {
 	wg.Add(workerCount)
 
 	for i := 0; i < workerCount; i++ {
-		go workerReconnectLoop(workersCtx, wg, controllerAddress)
+		go workerReconnectLoop(workersCtx, logger, wg, controllerAddress)
 	}
 
 	wgFinishedChan := make(chan struct{})
@@ -212,12 +219,12 @@ func main() {
 
 	select {
 	case <-sigChan:
-		slog.Info("Process received SIGINT/SIGTERM, shutting down")
+		logger.Info("Process received SIGINT/SIGTERM, shutting down")
 		stopWorkers()
 		wg.Wait()
 	case <-wgFinishedChan:
-		slog.Info("All workers stopped, shutting down")
+		logger.Info("All workers stopped, shutting down")
 	}
 
-	slog.Info("Agent stopped")
+	logger.Info("Agent stopped")
 }

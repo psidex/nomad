@@ -25,9 +25,21 @@ func NewWorker() *Worker {
 	return &Worker{}
 }
 
-func (w Worker) ScrapeSinglePage(urlToScrape string) *pb.ScrapedData {
+func (w Worker) ScrapeSinglePage(urlToScrape string) pb.ScrapedData {
 	// Time how long our scrape operation takes
 	startTime := time.Now()
+
+	baseURL, err := url.Parse(urlToScrape)
+	if err != nil {
+		slog.Info("Failed running url.Parse", "urlToScrape", urlToScrape, "err", err)
+		return pb.ScrapedData{
+			AgentId:    w.Id,
+			ScrapedUrl: urlToScrape,
+			FoundUrls:  []string{},
+			Metrics:    &pb.ScrapeMetrics{},
+			Error:      pb.ScrapeError_INVALID_REQUEST,
+		}
+	}
 
 	// TODO: is this a correct way to do the chromedp context?
 	// Create context an ensure any long running Chrome tasks are cancelled when we exit
@@ -53,7 +65,7 @@ func (w Worker) ScrapeSinglePage(urlToScrape string) *pb.ScrapedData {
 	}
 
 	var pageSource string
-	err := chromedp.Run(ctx,
+	err = chromedp.Run(ctx,
 		network.Enable(),
 		chromedp.ActionFunc(countBytesAction),
 		chromedp.Navigate(urlToScrape),
@@ -68,19 +80,25 @@ func (w Worker) ScrapeSinglePage(urlToScrape string) *pb.ScrapedData {
 	)
 	if err != nil {
 		slog.Info("Failed running chromedp.Run", "urlToScrape", urlToScrape, "err", err)
-		return nil
-	}
-
-	baseURL, err := url.Parse(urlToScrape)
-	if err != nil {
-		slog.Info("Failed running url.Parse", "urlToScrape", urlToScrape, "err", err)
-		return nil
+		return pb.ScrapedData{
+			AgentId:    w.Id,
+			ScrapedUrl: urlToScrape,
+			FoundUrls:  []string{},
+			Metrics:    &pb.ScrapeMetrics{},
+			Error:      pb.ScrapeError_TIMEOUT,
+		}
 	}
 
 	parsed, err := html.Parse(strings.NewReader(pageSource))
 	if err != nil {
 		slog.Info("Failed running html.Parse", "urlToScrape", urlToScrape, "err", err)
-		return nil
+		return pb.ScrapedData{
+			AgentId:    w.Id,
+			ScrapedUrl: urlToScrape,
+			FoundUrls:  []string{},
+			Metrics:    &pb.ScrapeMetrics{},
+			Error:      pb.ScrapeError_INVALID_REQUEST,
+		}
 	}
 
 	urls := extractURLs(parsed, baseURL)
@@ -93,7 +111,7 @@ func (w Worker) ScrapeSinglePage(urlToScrape string) *pb.ScrapedData {
 		ScrapeDurationMs:  duration,
 	}
 
-	return &pb.ScrapedData{
+	return pb.ScrapedData{
 		AgentId:    w.Id,
 		ScrapedUrl: urlToScrape,
 		FoundUrls:  urls,
