@@ -21,7 +21,8 @@ import (
 )
 
 var (
-	upgrader = websocket.Upgrader{}
+	upgrader                = websocket.Upgrader{}
+	DEBUG_TOTAL_BYTES int64 = 0
 )
 
 type SessionConfig struct {
@@ -29,8 +30,8 @@ type SessionConfig struct {
 	HttpClientTimeout lib.Duration `json:"httpClientTimeout"` // unused
 	WorkerCooldown    lib.Duration `json:"workerCooldown"`    // unused
 	WorkerCount       uint         `json:"workerCount"`       // unused
+	RandomCrawl       bool         `json:"randomCrawl"`       // unused
 	InitialUrls       []string     `json:"initialUrls"`
-	RandomCrawl       bool         `json:"randomCrawl"`
 }
 
 type Server struct {
@@ -118,12 +119,13 @@ func (s *Server) Session(w http.ResponseWriter, r *http.Request) {
 					continue
 				}
 
+				s.logger.Debug("Trying to add hostname connection", "from", scrapedHostname, "to", foundHostname, "foundHostnameAsUrl", foundHostnameAsUrl)
 				if added := s.frontier.AddUrl(foundHostnameAsUrl); added {
+					s.logger.Debug("Adding hostname connection", "from", scrapedHostname, "to", foundHostname)
 					s.frontEnd.AddHostnameConnection(scrapedHostname, foundHostname)
 				}
 
 			}
-
 			// TODO: dead-end support
 			s.frontEnd.NotifyEndCrawl(1, scrapedHostname, false)
 		}
@@ -188,7 +190,8 @@ func (s *Server) WorkerStream(srv pb.Controller_WorkerStreamServer) error {
 	// Send configuration to the worker
 	configUpdate := &pb.WorkerConfig{
 		WorkerId:              workerId,
-		SingleScrapeTimeoutMs: 100_000,
+		SingleScrapeTimeoutMs: 10_000,
+		Mode:                  pb.WorkerMode_HYBRID,
 	}
 	err = srv.Send(&pb.ControllerMessage{
 		Message: &pb.ControllerMessage_ConfigUpdate{
@@ -231,11 +234,13 @@ func (s *Server) WorkerStream(srv pb.Controller_WorkerStreamServer) error {
 			continue
 		}
 
-		s.logger.Debug("Scrape loop end", "workerId", workerId, "request", req)
 		data := req.GetData()
 		if data == nil {
 			s.logger.Error("Received nil data from worker", "req", req)
 		} else {
+			// TODO: Remove this global var and log
+			DEBUG_TOTAL_BYTES += data.Metrics.ResponseSizeBytes
+			s.logger.Debug("Downloaded", "total", DEBUG_TOTAL_BYTES)
 			s.outputs <- data
 		}
 	}

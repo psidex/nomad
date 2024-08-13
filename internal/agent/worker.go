@@ -2,120 +2,165 @@ package agent
 
 import (
 	"context"
+	"io"
 	"log/slog"
-	"net/url"
-	"strings"
-	"time"
 
-	"golang.org/x/net/html"
-
-	"github.com/chromedp/cdproto/dom"
-	"github.com/chromedp/cdproto/network"
-	"github.com/chromedp/chromedp"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/psidex/nomad/internal/controller/pb"
+	"github.com/psidex/nomad/internal/lib"
+)
+
+const (
+	// How many times the worker stream send/recv can error before abandoning
+	streamErrCountThreshold = 5
 )
 
 type Worker struct {
-	Id  int32
-	Cfg *pb.WorkerConfig
+	id     int32
+	cfg    *pb.WorkerConfig
+	ctx    context.Context
+	logger *slog.Logger
+	addr   string
 }
 
-func NewWorker() *Worker {
-	return &Worker{}
+func NewWorker(ctx context.Context, logger *slog.Logger, addr string) *Worker {
+	return &Worker{
+		id:     0,
+		cfg:    &pb.WorkerConfig{},
+		ctx:    ctx,
+		logger: logger,
+		addr:   addr,
+	}
 }
 
-func (w Worker) ScrapeSinglePage(urlToScrape string) pb.ScrapedData {
-	// Time how long our scrape operation takes
-	startTime := time.Now()
+// Work enters the worker stream with the controller.
+// Returns true/false to indicate if it should be called again (for reconnecting)
+func (w *Worker) Work() bool {
+	w.logger.Info("Connecting to controller", "address", w.addr)
 
-	baseURL, err := url.Parse(urlToScrape)
-	if err != nil {
-		slog.Info("Failed running url.Parse", "urlToScrape", urlToScrape, "err", err)
-		return pb.ScrapedData{
-			AgentId:    w.Id,
-			ScrapedUrl: urlToScrape,
-			FoundUrls:  []string{},
-			Metrics:    &pb.ScrapeMetrics{},
-			Error:      pb.ScrapeError_INVALID_REQUEST,
-		}
-	}
-
-	// TODO: is this a correct way to do the chromedp context?
-	// Create context an ensure any long running Chrome tasks are cancelled when we exit
-	timeoutCtx, timeoutCancel := context.WithTimeout(
-		context.Background(),
-		time.Millisecond*time.Duration(w.Cfg.SingleScrapeTimeoutMs),
-	)
-	defer timeoutCancel()
-
-	ctx, cancel := chromedp.NewContext(timeoutCtx)
-	defer cancel()
-
-	downloadedBytes := int64(0)
-
-	countBytesAction := func(ctx context.Context) error {
-		chromedp.ListenTarget(ctx, func(ev interface{}) {
-			switch ev := ev.(type) {
-			case *network.EventLoadingFinished:
-				downloadedBytes += int64(ev.EncodedDataLength)
-			}
-		})
-		return nil
-	}
-
-	var pageSource string
-	err = chromedp.Run(ctx,
-		network.Enable(),
-		chromedp.ActionFunc(countBytesAction),
-		chromedp.Navigate(urlToScrape),
-		chromedp.ActionFunc(func(ctx context.Context) error {
-			node, err := dom.GetDocument().Do(ctx)
-			if err != nil {
-				return err
-			}
-			pageSource, err = dom.GetOuterHTML().WithNodeID(node.NodeID).Do(ctx)
-			return err
-		}),
+	conn, err := grpc.NewClient(
+		w.addr,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	)
 	if err != nil {
-		slog.Info("Failed running chromedp.Run", "urlToScrape", urlToScrape, "err", err)
-		return pb.ScrapedData{
-			AgentId:    w.Id,
-			ScrapedUrl: urlToScrape,
-			FoundUrls:  []string{},
-			Metrics:    &pb.ScrapeMetrics{},
-			Error:      pb.ScrapeError_TIMEOUT,
-		}
+		w.logger.Error("Could not connect to controller", "error", err)
+		return true
 	}
+	defer func() { _ = conn.Close() }()
 
-	parsed, err := html.Parse(strings.NewReader(pageSource))
+	controller := pb.NewControllerClient(conn)
+
+	w.logger.Info("Initiating worker stream with controller")
+	stream, err := controller.WorkerStream(context.Background())
 	if err != nil {
-		slog.Info("Failed running html.Parse", "urlToScrape", urlToScrape, "err", err)
-		return pb.ScrapedData{
-			AgentId:    w.Id,
-			ScrapedUrl: urlToScrape,
-			FoundUrls:  []string{},
-			Metrics:    &pb.ScrapeMetrics{},
-			Error:      pb.ScrapeError_INVALID_REQUEST,
+		w.logger.Error("Error creating worker stream", "error", err)
+		return true
+	}
+	defer func() { _ = stream.CloseSend() }()
+
+	w.logger.Info("Handshaking with controller")
+	if err = stream.Send(
+		&pb.WorkerMessage{
+			Message: &pb.WorkerMessage_Handshake{
+				Handshake: &pb.WorkerHandshake{
+					NomadVersion: lib.NomadVersion,
+				},
+			},
+		},
+	); err != nil {
+		w.logger.Error("Failed to handshake with controller", "error", err)
+		// If the handshake failed, the fix probably wont be a simple reconnect
+		return false
+	}
+
+	streamErrCount := 0
+
+mainLoop:
+	for {
+		select {
+		case <-w.ctx.Done():
+			w.logger.Info("Stopping: Context cancelled")
+			return false
+		default:
+		}
+
+		if streamErrCount >= streamErrCountThreshold {
+			w.logger.Warn("Stream error count threshold reached, abandoning connection", "count", streamErrCount)
+			return true
+		}
+
+		var resp *pb.ControllerMessage
+		resp, err = stream.Recv()
+		if err == io.EOF || err != nil {
+			w.logger.Error("Received error from worker stream", "error", err)
+			streamErrCount++
+			continue
+		}
+
+		switch msg := resp.Message.(type) {
+		case *pb.ControllerMessage_ScrapeInstruction:
+			for _, url := range msg.ScrapeInstruction.Urls {
+				w.logger.Info("Scraping URL", "url", url)
+
+				scrapedData := w.scrapeSinglePage(url)
+
+				resp := &pb.WorkerMessage{
+					Message: &pb.WorkerMessage_Data{
+						Data: scrapedData,
+					},
+				}
+
+				if err := stream.Send(resp); err != nil {
+					w.logger.Error("Failed to send on worker stream", "error", err)
+					streamErrCount++
+					continue mainLoop
+				}
+			}
+
+		case *pb.ControllerMessage_ConfigUpdate:
+			w.logger.Info("Received worker config update", "config", msg.ConfigUpdate)
+			w.id = msg.ConfigUpdate.WorkerId
+			w.cfg = msg.ConfigUpdate
+
+		case *pb.ControllerMessage_Shutdown:
+			w.logger.Info("Stopping: Received shutdown from controller")
+			return false
+
+		default:
+			w.logger.Error("Received unknown message type from controller", "message", resp)
+			// We probably shouldn't try to reconnect if the controller is doing this
+			return false
+		}
+	}
+}
+
+func (w Worker) scrapeSinglePage(urlToScrape string) *pb.ScrapedData {
+	var data pb.ScrapedData
+
+	switch w.cfg.Mode {
+	case pb.WorkerMode_BASIC:
+		data = w.makeBasicHttpRequest(urlToScrape)
+	case pb.WorkerMode_CHROME:
+		data = w.makeChromeRequest(urlToScrape)
+	case pb.WorkerMode_HYBRID:
+		data = w.makeBasicHttpRequest(urlToScrape)
+		if data.Error != pb.ScrapeError_NONE || data.Metrics.NumFoundUrls <= 0 {
+			w.logger.Info("Basic HTTP request failed, falling back to Chrome")
+			data = w.makeChromeRequest(urlToScrape)
 		}
 	}
 
-	urls := extractURLs(parsed, baseURL)
-
-	duration := int32(time.Since(startTime).Milliseconds())
-
-	metrics := &pb.ScrapeMetrics{
-		ResponseSizeBytes: downloadedBytes,
-		NumFoundUrls:      int32(len(urls)),
-		ScrapeDurationMs:  duration,
+	if data.Error != pb.ScrapeError_NONE {
+		return &pb.ScrapedData{
+			AgentId:    w.id,
+			ScrapedUrl: urlToScrape,
+			FoundUrls:  []string{},
+			Metrics:    &pb.ScrapeMetrics{},
+			Error:      data.Error,
+		}
 	}
 
-	return pb.ScrapedData{
-		AgentId:    w.Id,
-		ScrapedUrl: urlToScrape,
-		FoundUrls:  urls,
-		Metrics:    metrics,
-		Error:      pb.ScrapeError_NONE,
-	}
+	return &data
 }

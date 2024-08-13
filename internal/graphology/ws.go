@@ -13,6 +13,8 @@ import (
 
 // GraphologyWs defines a WebsocketGraphProvider that renders Graphology data for
 // nomad-frontend as JSON and streams it over a websocket.
+// It uses 2 sets to ensure that there are no duplicate nodes assigned, no duplicate
+// edges assigned, and "nodeupdate" messages are only send for a new edge on an old node
 type GraphologyWs struct {
 	mu     *sync.Mutex
 	hasher *StrHasher
@@ -46,6 +48,15 @@ func (g *GraphologyWs) AddHostnameConnection(fromHost, toHost string) {
 	// Create the data structure.
 	fromHostNode := node{Key: fromHostId}
 
+	// Same for the to host.
+	toHostId := strconv.Itoa(g.hasher.Hash(toHost))
+
+	// Check for if we've seen this edge before in either direction.
+	// Use tab as a separator as it's impossible to appear in the IDs.
+	edgeStr := fromHostId + "\t" + toHostId
+	inverseEdgeStr := toHostId + "\t" + fromHostId
+	haveNotSeenThisEdge := !g.seenEdges.Contains(edgeStr) && !g.seenEdges.Contains(inverseEdgeStr)
+
 	if !g.seenNodes.Contains(fromHostId) {
 		// This is a new node.
 		g.seenNodes.Add(fromHostId)
@@ -57,14 +68,13 @@ func (g *GraphologyWs) AddHostnameConnection(fromHost, toHost string) {
 		if err := g.ws.WriteMessage(t, fromHostNode.toNodeJson()); err != nil {
 			log.Print("ws.WriteMessage err:", err)
 		}
-	} else {
-		// Inform the frontend that this has been seen again.
+	} else if haveNotSeenThisEdge {
+		// Inform the frontend that this is an old node gaining a new edge.
 		if err := g.ws.WriteMessage(t, fromHostNode.toNodeUpdateJson()); err != nil {
 			log.Print("ws.WriteMessage err:", err)
 		}
 	}
 
-	toHostId := strconv.Itoa(g.hasher.Hash(toHost))
 	if !g.seenNodes.Contains(toHostId) {
 		g.seenNodes.Add(toHostId)
 		toHostNode := node{Key: toHostId}
@@ -74,12 +84,7 @@ func (g *GraphologyWs) AddHostnameConnection(fromHost, toHost string) {
 		}
 	}
 
-	// Check if we've seen this edge before in either direction - use tab as a separator
-	// as it's impossible to appear in the IDs.
-	edgeStr := fromHostId + "\t" + toHostId
-	inverseEdgeStr := toHostId + "\t" + fromHostId
-
-	if !g.seenEdges.Contains(edgeStr) && !g.seenEdges.Contains(inverseEdgeStr) {
+	if haveNotSeenThisEdge {
 		// Only need to add the first because we check for both each time
 		g.seenEdges.Add(edgeStr)
 		g.edgeCount++

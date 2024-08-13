@@ -10,7 +10,7 @@ const deadEndNodeColour = '#db4139';
 
 const initialNodeSize = 2;
 const maxNodeSize = 10;
-const nodeSizeIncrease = (i: number) => i + 0.2;
+const nodeSizeIncrease = (i: number) => i + 0.5;
 
 declare interface NomadSessionConfig {
   workerCooldown: string;

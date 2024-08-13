@@ -15,12 +15,25 @@ message ScrapeInstruction {
   repeated string urls = 1;
 }
 
+// The mode with which the worker should operator
+enum WorkerMode {
+  // Only make basic requests using a HTTP client
+  BASIC = 0;
+  // Run all requests through Chrome
+  CHROME = 1;
+  // For each query, start with a basic request. If this fails or returns no URLs, try
+  // again with Chrome
+  HYBRID = 2;
+}
+
 // Configuration update for workers
 message WorkerConfig {
   // A unique ID for the worker assigned by the controller
   int32 worker_id = 1;
   // The timeout the agent should use for each single page scrape operation
   int32 single_scrape_timeout_ms = 2;
+  // The mode the worker should use
+  WorkerMode mode =3;
 }
 
 message Shutdown {}

@@ -87,7 +87,7 @@ func main() {
 	}
 
 	logger := lib.NiceLogger(os.Stdout, logLevel)
-	logger.Info("Starting controller")
+	logger.Info("Starting nomad-controller", "version", lib.NomadVersion, "commit", lib.GitCommit+lib.GitDirty, "time", lib.GitTime)
 
 	controllerGrpcServer := initGrpc(logger)
 
