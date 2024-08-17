@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"log/slog"
 	"os"
 	"os/signal"
 	"strconv"
@@ -9,20 +10,18 @@ import (
 	"syscall"
 	"time"
 
-	"log/slog"
+	"github.com/charmbracelet/log"
 
 	"github.com/psidex/nomad/internal/agent"
 	"github.com/psidex/nomad/internal/lib"
 )
-
-// TODO: Include build info (including git info) in compiled bin
 
 const (
 	// How long to wait between trying to reconnect to the controller
 	reconnectSleep = time.Second * 3
 
 	// Default logging level, set using NOMAD_LOG_LEVEL
-	defaultLogLevel = slog.LevelDebug
+	defaultLogLevel = log.DebugLevel
 	// Default controller address, set using NOMAD_CONTROLLER_GRPC_ADDRESS
 	defaultControllerAddress = "nomad-controller:50051"
 	// Default worker count, set using NOMAD_AGENT_WORKER_COUNT
@@ -55,7 +54,7 @@ func main() {
 	logLevel := defaultLogLevel
 	if level := os.Getenv("NOMAD_LOG_LEVEL"); level != "" {
 		var err error
-		logLevel, err = lib.ParseSLogLevel(level)
+		logLevel, err = log.ParseLevel(level)
 		if err != nil {
 			slog.Error("Invalid value for NOMAD_LOG_LEVEL", "value", level, "error", err)
 			return
@@ -63,7 +62,7 @@ func main() {
 	}
 
 	logger := lib.NiceLogger(os.Stdout, logLevel)
-	logger.Info("Starting nomad-agent", "version", lib.NomadVersion, "commit", lib.GitCommit+lib.GitDirty, "time", lib.GitTime)
+	logger.Info("Starting nomad-agent", "version", lib.NomadVersion, "commit", lib.GitCommit[0:7]+lib.GitDirty, "time", lib.GitTime)
 
 	controllerAddress := defaultControllerAddress
 	if addr := os.Getenv("NOMAD_CONTROLLER_GRPC_ADDRESS"); addr != "" {

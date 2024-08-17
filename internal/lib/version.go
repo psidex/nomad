@@ -24,7 +24,7 @@ func init() {
 				GitTime = setting.Value
 			case "vcs.modified":
 				if setting.Value == "true" {
-					GitDirty = "-dirty"
+					GitDirty = " (dirty)"
 				}
 			}
 		}

@@ -1,12 +1,12 @@
 package main
 
 import (
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
 
-	"log/slog"
-
+	"github.com/charmbracelet/log"
 	"google.golang.org/grpc"
 
 	"github.com/psidex/nomad/internal/lib"
@@ -17,9 +17,9 @@ import (
 
 const (
 	// Default logging level, set using NOMAD_LOG_LEVEL
-	defaultLogLevel = slog.LevelDebug
+	defaultLogLevel = log.DebugLevel
 	// Default controller address, set using NOMAD_CONTROLLER_GRPC_ADDRESS
-	defaultControllerAddress = "nomad-controller:50051"
+	defaultControllerAddress = "0.0.0.0:50051"
 	// Default HTTP server address, set using NOMAD_CONTROLLER_HTTP_ADDRESS
 	defaultHttpAddress = "0.0.0.0:8080"
 )
@@ -79,20 +79,19 @@ func main() {
 	logLevel := defaultLogLevel
 	if level := os.Getenv("NOMAD_LOG_LEVEL"); level != "" {
 		var err error
-		logLevel, err = lib.ParseSLogLevel(level)
-		if err != nil {
+		if logLevel, err = log.ParseLevel(level); err != nil {
 			slog.Error("Invalid value for NOMAD_LOG_LEVEL", "value", level, "error", err)
 			os.Exit(1)
 		}
 	}
 
 	logger := lib.NiceLogger(os.Stdout, logLevel)
-	logger.Info("Starting nomad-controller", "version", lib.NomadVersion, "commit", lib.GitCommit+lib.GitDirty, "time", lib.GitTime)
+	logger.Info("Starting nomad-controller", "version", lib.NomadVersion, "commit", lib.GitCommit[0:7]+lib.GitDirty, "time", lib.GitTime)
 
 	controllerGrpcServer := initGrpc(logger)
 
 	// Will block until we want to exit / crash
 	initHttp(logger, controllerGrpcServer)
 
-	logger.Info("Gracefully finished, goodbye")
+	logger.Info("Stopped, goodbye")
 }

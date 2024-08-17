@@ -40,6 +40,7 @@ func NewWorker(ctx context.Context, logger *slog.Logger, addr string) *Worker {
 func (w *Worker) Work() bool {
 	w.logger.Info("Connecting to controller", "address", w.addr)
 
+	// TODO: The conn and/or controller should be shared between all workers maybe?
 	conn, err := grpc.NewClient(
 		w.addr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
