@@ -1,7 +1,7 @@
 FROM golang:latest AS go-builder
 WORKDIR /build
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -buildvcs=true -o ./nomad-controller ./cmd/nomad-controller/main.go
+RUN CGO_ENABLED=0 GOOS=linux go build -buildvcs=true -o ./nomad-controller ./cmd/nomad-controller
 
 FROM node:20.11 AS frontend-builder
 ENV PATH=/build/node_modules/.bin:$PATH

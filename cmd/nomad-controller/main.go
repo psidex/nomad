@@ -30,7 +30,7 @@ func initGrpc(logger *slog.Logger) *controller.Server {
 		grpcBindAddr = addr
 	}
 
-	logger.Info("Bind address configured", "address", grpcBindAddr)
+	logger.Info("gRPC listen address configured", "address", grpcBindAddr)
 
 	lis, err := net.Listen("tcp", grpcBindAddr)
 	if err != nil {
@@ -64,6 +64,8 @@ func initHttp(logger *slog.Logger, controllerGrpcServer *controller.Server) {
 		httpBindAddress = addr
 	}
 
+	logger.Info("HTTP listen address configured", "address", httpBindAddress)
+
 	staticDir := "public"
 
 	http.Handle("/", http.FileServer(http.Dir(staticDir)))
@@ -86,7 +88,12 @@ func main() {
 	}
 
 	logger := lib.NiceLogger(os.Stdout, logLevel)
-	logger.Info("Starting nomad-controller", "version", lib.NomadVersion, "commit", lib.GitCommit[0:7]+lib.GitDirty, "time", lib.GitTime)
+	logger.Info(
+		"Starting nomad-controller",
+		"version", lib.NomadVersion,
+		"commit", lib.GitCommit[0:7]+lib.GitDirty,
+		"commitTime", lib.GitTime,
+	)
 
 	controllerGrpcServer := initGrpc(logger)
 

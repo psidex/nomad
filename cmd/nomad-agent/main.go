@@ -8,18 +8,20 @@ import (
 	"strconv"
 	"sync"
 	"syscall"
-	"time"
 
 	"github.com/charmbracelet/log"
+	"github.com/chromedp/chromedp"
+
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+
+	"github.com/psidex/nomad/internal/controller/pb"
+	"github.com/psidex/nomad/internal/lib"
 
 	"github.com/psidex/nomad/internal/agent"
-	"github.com/psidex/nomad/internal/lib"
 )
 
 const (
-	// How long to wait between trying to reconnect to the controller
-	reconnectSleep = time.Second * 3
-
 	// Default logging level, set using NOMAD_LOG_LEVEL
 	defaultLogLevel = log.DebugLevel
 	// Default controller address, set using NOMAD_CONTROLLER_GRPC_ADDRESS
@@ -27,28 +29,6 @@ const (
 	// Default worker count, set using NOMAD_AGENT_WORKER_COUNT
 	defaultWorkerCount = 1
 )
-
-func workerReconnectLoop(ctx context.Context, logger *slog.Logger, wg *sync.WaitGroup, controllerAddress string) {
-	defer wg.Done()
-	logger.Info("Worker starting")
-
-	w := agent.NewWorker(ctx, logger, controllerAddress)
-	for {
-		if !w.Work() {
-			break
-		}
-		logger.Info("Worker reconnecting", "waitDuration", reconnectSleep)
-		select {
-		case <-ctx.Done():
-			// We check the ctx here as well as we could be in a recconnect loop
-			logger.Info("Worker stopping due to context cancellation")
-			return
-		case <-time.After(reconnectSleep):
-		}
-	}
-
-	logger.Info("Worker stopped")
-}
 
 func main() {
 	logLevel := defaultLogLevel
@@ -62,11 +42,50 @@ func main() {
 	}
 
 	logger := lib.NiceLogger(os.Stdout, logLevel)
-	logger.Info("Starting nomad-agent", "version", lib.NomadVersion, "commit", lib.GitCommit[0:7]+lib.GitDirty, "time", lib.GitTime)
+	defer logger.Info("Agent stopped")
+	logger.Info(
+		"Starting nomad-agent",
+		"version", lib.NomadVersion,
+		"commit", lib.GitCommit[0:7]+lib.GitDirty,
+		"commitTime", lib.GitTime,
+	)
+
+	logger.Info("Creating controller client")
 
 	controllerAddress := defaultControllerAddress
 	if addr := os.Getenv("NOMAD_CONTROLLER_GRPC_ADDRESS"); addr != "" {
 		controllerAddress = addr
+	}
+
+	conn, err := grpc.NewClient(
+		controllerAddress,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		logger.Error("Could create controller client", "error", err)
+		os.Exit(1)
+	}
+	defer func() { _ = conn.Close() }()
+
+	// Share one client between all workers, this is documented as safe and as far as I
+	// can tell, shouldn't cause any performance issues.
+	// https://github.com/grpc/grpc-go/blob/master/Documentation/concurrency.md
+	controller := pb.NewControllerClient(conn)
+
+	logger.Info("Warming up Chrome")
+
+	// Create a master chromedp context which should keep the headless processes warm.
+	// Also allows us to create contexts off of it, which I think is using a new tab
+	// instead of a whole new browser process.
+	chromedpCtx, cancel := chromedp.NewContext(
+		context.Background(),
+	)
+	// TODO: Cancel anywhere else? need to do chromedp.FromContext(ctx).Allocator.Wait?
+	defer cancel()
+
+	// Ensure Chrome is warm by executing nothing!
+	if err := chromedp.Run(chromedpCtx); err != nil {
+		logger.Error("chromedp warmup failed, continuing", "error", err)
 	}
 
 	workerCount := defaultWorkerCount
@@ -75,7 +94,7 @@ func main() {
 		workerCount, err = strconv.Atoi(count)
 		if err != nil || workerCount <= 0 {
 			logger.Error("Invalid value for NOMAD_AGENT_WORKER_COUNT", "value", count, "error", err)
-			return
+			os.Exit(1)
 		}
 	}
 
@@ -83,30 +102,36 @@ func main() {
 
 	workersCtx, stopWorkers := context.WithCancel(context.Background())
 
-	wg := &sync.WaitGroup{}
-	wg.Add(workerCount)
+	workerWg := &sync.WaitGroup{}
+	workerWg.Add(workerCount)
 
+	logger.Info("Spinning up workers")
 	for i := 0; i < workerCount; i++ {
-		go workerReconnectLoop(workersCtx, logger, wg, controllerAddress)
+		go agent.NewWorker(
+			workersCtx, logger, workerWg, chromedpCtx, i, controller,
+		).ReconnectLoop()
 	}
 
 	wgFinishedChan := make(chan struct{})
 	go func() {
-		wg.Wait()
+		workerWg.Wait()
 		close(wgFinishedChan)
 	}()
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
+	logger.Info("Main thread waiting for SIGINT / SIGTERM / WaitGroup")
+
 	select {
 	case <-sigChan:
 		logger.Info("Process received SIGINT/SIGTERM, shutting down")
+		// TODO: Worker will hang if waiting for controller stream recv
 		stopWorkers()
-		wg.Wait()
+		workerWg.Wait()
 	case <-wgFinishedChan:
 		logger.Info("All workers stopped, shutting down")
 	}
 
-	logger.Info("Agent stopped")
+	// defers
 }

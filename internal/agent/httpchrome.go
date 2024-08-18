@@ -24,15 +24,8 @@ func (w Worker) makeChromeRequest(urlStr string) pb.ScrapedData {
 		return pb.ScrapedData{Error: pb.ScrapeError_INVALID_REQUEST}
 	}
 
-	// TODO: is this a correct way to do the chromedp context?
-	// Create context an ensure any long running Chrome tasks are cancelled when we exit
-	timeoutCtx, timeoutCancel := context.WithTimeout(
-		context.Background(),
-		time.Millisecond*time.Duration(w.cfg.SingleScrapeTimeoutMs),
-	)
-	defer timeoutCancel()
-
-	ctx, cancel := chromedp.NewContext(timeoutCtx)
+	// TODO: Add timeout to this context somehow?
+	ctx, cancel := chromedp.NewContext(w.chromedpCtx)
 	defer cancel()
 
 	downloadedBytes := int64(0)

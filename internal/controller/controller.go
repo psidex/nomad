@@ -8,10 +8,10 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/gorilla/websocket"
+
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-
-	"github.com/gorilla/websocket"
 
 	"github.com/psidex/nomad/internal/frontier"
 	"github.com/psidex/nomad/internal/graphology"
@@ -187,6 +187,8 @@ func (s *Server) WorkerStream(srv pb.Controller_WorkerStreamServer) error {
 	s.workerCount += 1
 	workerId := s.workerCount
 
+	logger := s.logger.With("workerId", workerId)
+
 	// Send configuration to the worker
 	configUpdate := &pb.WorkerConfig{
 		WorkerId:              workerId,
@@ -199,7 +201,7 @@ func (s *Server) WorkerStream(srv pb.Controller_WorkerStreamServer) error {
 		},
 	})
 	if err != nil {
-		s.logger.Error("Failed to send worker config", "workerId", workerId, "error", err)
+		logger.Error("Failed to send worker config", "workerId", workerId, "error", err)
 		return nil
 	}
 
@@ -207,13 +209,13 @@ func (s *Server) WorkerStream(srv pb.Controller_WorkerStreamServer) error {
 	for {
 		select {
 		case <-ctx.Done():
-			s.logger.Error("gRPC context is done", "err", ctx.Err().Error())
+			logger.Error("gRPC context is done", "err", ctx.Err().Error())
 			return ctx.Err()
 		default:
 		}
 
 		url := <-s.urlsToScrape
-		s.logger.Debug("Issuing URL to worker", "url", url)
+		logger.Debug("Issuing URL to worker", "url", url)
 
 		resp := pb.ControllerMessage{
 			Message: &pb.ControllerMessage_ScrapeInstruction{
@@ -221,26 +223,26 @@ func (s *Server) WorkerStream(srv pb.Controller_WorkerStreamServer) error {
 			},
 		}
 		if err := srv.Send(&resp); err != nil {
-			s.logger.Error("Failed to send on worker stream", "workerId", workerId, "error", err)
+			logger.Error("Failed to send on worker stream", "workerId", workerId, "error", err)
 		}
 
 		req, err := srv.Recv()
 		if err == io.EOF {
-			s.logger.Error("Received EOF on worker stream", "workerId", workerId)
+			logger.Error("Received EOF on worker stream", "workerId", workerId)
 			break
 		}
 		if err != nil {
-			s.logger.Error("Received error on worker stream", "workerId", workerId, "error", err)
+			logger.Error("Received error on worker stream", "workerId", workerId, "error", err)
 			continue
 		}
 
 		data := req.GetData()
 		if data == nil {
-			s.logger.Error("Received nil data from worker", "req", req)
+			logger.Error("Received nil data from worker", "req", req)
 		} else {
 			// TODO: Remove this global var and log
 			DEBUG_TOTAL_BYTES += data.Metrics.ResponseSizeBytes
-			s.logger.Debug("Downloaded", "total", DEBUG_TOTAL_BYTES)
+			logger.Debug("Downloaded", "total", DEBUG_TOTAL_BYTES)
 			s.outputs <- data
 		}
 	}
@@ -248,9 +250,9 @@ func (s *Server) WorkerStream(srv pb.Controller_WorkerStreamServer) error {
 	if err := srv.Send(&pb.ControllerMessage{
 		Message: &pb.ControllerMessage_Shutdown{},
 	}); err != nil {
-		s.logger.Error("Failed to send shutdown message", "workerId", workerId, "error", err)
+		logger.Error("Failed to send shutdown message", "workerId", workerId, "error", err)
 	}
 
-	s.logger.Debug("Scrape function end", "workerId", workerId)
+	logger.Debug("Scrape function end", "workerId", workerId)
 	return nil
 }

@@ -4,9 +4,8 @@ import (
 	"context"
 	"io"
 	"log/slog"
-
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
+	"sync"
+	"time"
 
 	"github.com/psidex/nomad/internal/controller/pb"
 	"github.com/psidex/nomad/internal/lib"
@@ -15,46 +14,71 @@ import (
 const (
 	// How many times the worker stream send/recv can error before abandoning
 	streamErrCountThreshold = 5
+
+	// How long to wait between trying to reconnect to the controller
+	reconnectSleep = time.Second * 3
 )
 
 type Worker struct {
-	id     int32
-	cfg    *pb.WorkerConfig
-	ctx    context.Context
+	// The worker ID as controlled by the controller
+	id int32
+	// The config provided by the controller for this worker
+	cfg *pb.WorkerConfig
+	// The global worker context
+	ctx context.Context
+	// The global master chromedp context
+	chromedpCtx context.Context
+	// The global worker waitgroup
+	wg *sync.WaitGroup
+	// This workers logger
 	logger *slog.Logger
-	addr   string
+	// The controller client shared between all workers
+	controller pb.ControllerClient
 }
 
-func NewWorker(ctx context.Context, logger *slog.Logger, addr string) *Worker {
+func NewWorker(ctx context.Context, parentLogger *slog.Logger, wg *sync.WaitGroup, chromedpCtx context.Context, number int, controller pb.ControllerClient) *Worker {
+	// The number is our local "ID", just to identify logs from different goroutines
+	logger := parentLogger.With("workerNumber", number)
 	return &Worker{
-		id:     0,
-		cfg:    &pb.WorkerConfig{},
-		ctx:    ctx,
-		logger: logger,
-		addr:   addr,
+		id:          0,
+		cfg:         &pb.WorkerConfig{},
+		ctx:         ctx,
+		chromedpCtx: chromedpCtx,
+		wg:          wg,
+		logger:      logger,
+		controller:  controller,
 	}
+}
+
+// ReconnectLoop executes the Work function, and tries to reconnect (until the global
+// worker context is cancelled) if disconnected from the controller unexpectedly
+func (w Worker) ReconnectLoop() {
+	defer w.wg.Done()
+
+	w.logger.Info("Worker starting")
+
+	for {
+		if !w.Work() {
+			break
+		}
+		w.logger.Info("Worker reconnecting", "waitDuration", reconnectSleep)
+		select {
+		case <-w.ctx.Done():
+			// We check the ctx here as well as we could be in a recconnect loop
+			w.logger.Info("Worker stopping due to context cancellation")
+			return
+		case <-time.After(reconnectSleep):
+		}
+	}
+
+	w.logger.Info("Worker stopped")
 }
 
 // Work enters the worker stream with the controller.
 // Returns true/false to indicate if it should be called again (for reconnecting)
 func (w *Worker) Work() bool {
-	w.logger.Info("Connecting to controller", "address", w.addr)
-
-	// TODO: The conn and/or controller should be shared between all workers maybe?
-	conn, err := grpc.NewClient(
-		w.addr,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-	)
-	if err != nil {
-		w.logger.Error("Could not connect to controller", "error", err)
-		return true
-	}
-	defer func() { _ = conn.Close() }()
-
-	controller := pb.NewControllerClient(conn)
-
 	w.logger.Info("Initiating worker stream with controller")
-	stream, err := controller.WorkerStream(context.Background())
+	stream, err := w.controller.WorkerStream(context.Background())
 	if err != nil {
 		w.logger.Error("Error creating worker stream", "error", err)
 		return true
