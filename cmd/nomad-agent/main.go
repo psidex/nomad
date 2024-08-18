@@ -126,8 +126,11 @@ func main() {
 	select {
 	case <-sigChan:
 		logger.Info("Process received SIGINT/SIGTERM, shutting down")
-		// TODO: Worker will hang if waiting for controller stream recv
+		// Cancel worker context and then close controller conn, if any workers are
+		// waiting to Recv(), the closing of conn will trigger another work loop which
+		// will then pickup the ctx
 		stopWorkers()
+		conn.Close()
 		workerWg.Wait()
 	case <-wgFinishedChan:
 		logger.Info("All workers stopped, shutting down")

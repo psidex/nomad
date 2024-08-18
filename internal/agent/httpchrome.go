@@ -24,8 +24,15 @@ func (w Worker) makeChromeRequest(urlStr string) pb.ScrapedData {
 		return pb.ScrapedData{Error: pb.ScrapeError_INVALID_REQUEST}
 	}
 
-	// TODO: Add timeout to this context somehow?
-	ctx, cancel := chromedp.NewContext(w.chromedpCtx)
+	// Create a new context off of the master, opens a new tab(?)
+	newTabCtx, newTabCancel := chromedp.NewContext(w.chromedpCtx)
+	defer newTabCancel()
+
+	// Add a timeout
+	ctx, cancel := context.WithTimeout(
+		newTabCtx,
+		time.Millisecond*time.Duration(w.cfg.SingleScrapeTimeoutMs),
+	)
 	defer cancel()
 
 	downloadedBytes := int64(0)

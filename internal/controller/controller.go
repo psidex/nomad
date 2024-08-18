@@ -191,8 +191,9 @@ func (s *Server) WorkerStream(srv pb.Controller_WorkerStreamServer) error {
 
 	// Send configuration to the worker
 	configUpdate := &pb.WorkerConfig{
-		WorkerId:              workerId,
-		SingleScrapeTimeoutMs: 10_000,
+		WorkerId: workerId,
+		// TODO: These should come from the frontend
+		SingleScrapeTimeoutMs: 5000,
 		Mode:                  pb.WorkerMode_HYBRID,
 	}
 	err = srv.Send(&pb.ControllerMessage{
@@ -240,9 +241,10 @@ func (s *Server) WorkerStream(srv pb.Controller_WorkerStreamServer) error {
 		if data == nil {
 			logger.Error("Received nil data from worker", "req", req)
 		} else {
-			// TODO: Remove this global var and log
+			// TODO: Remove this global var and log?
 			DEBUG_TOTAL_BYTES += data.Metrics.ResponseSizeBytes
-			logger.Debug("Downloaded", "total", DEBUG_TOTAL_BYTES)
+			megabytes := float64(DEBUG_TOTAL_BYTES) / (1024 * 1024)
+			logger.Debug("Downloaded", "megabytes", megabytes)
 			s.outputs <- data
 		}
 	}

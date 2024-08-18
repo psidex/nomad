@@ -15,6 +15,8 @@ import (
 	pb "github.com/psidex/nomad/internal/controller/pb"
 )
 
+// TODO: A dead worker causes scrape to not start
+
 const (
 	// Default logging level, set using NOMAD_LOG_LEVEL
 	defaultLogLevel = log.DebugLevel
