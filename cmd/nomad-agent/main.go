@@ -2,14 +2,13 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
-	"strconv"
 	"sync"
 	"syscall"
 
-	"github.com/charmbracelet/log"
 	"github.com/chromedp/chromedp"
 
 	"google.golang.org/grpc"
@@ -18,51 +17,31 @@ import (
 	"github.com/psidex/nomad/internal/controller/pb"
 	"github.com/psidex/nomad/internal/lib"
 
-	"github.com/psidex/nomad/internal/agent"
-)
-
-const (
-	// Default logging level, set using NOMAD_LOG_LEVEL
-	defaultLogLevel = log.DebugLevel
-	// Default controller address, set using NOMAD_CONTROLLER_GRPC_ADDRESS
-	defaultControllerAddress = "nomad-controller:50051"
-	// Default worker count, set using NOMAD_AGENT_WORKER_COUNT
-	defaultWorkerCount = 1
-
-	// Debugging option to show Chrome GUI, obviously will only work if you're executing
-	// in a GUI environment
-	debugVisualChrome = false
+	"github.com/psidex/nomad/internal/agent/config"
+	"github.com/psidex/nomad/internal/agent/worker"
 )
 
 func main() {
-	logLevel := defaultLogLevel
-	if level := os.Getenv("NOMAD_LOG_LEVEL"); level != "" {
-		var err error
-		logLevel, err = log.ParseLevel(level)
-		if err != nil {
-			slog.Error("Invalid value for NOMAD_LOG_LEVEL", "value", level, "error", err)
-			return
-		}
+	cfg, err := config.Init()
+	if err != nil {
+		slog.Error("Could not load config", "error", err)
+		os.Exit(1)
 	}
 
-	logger := lib.NiceLogger(os.Stdout, logLevel)
+	logger := lib.NiceLogger(os.Stdout, cfg.LogLevel)
 	defer logger.Info("Agent stopped")
 	logger.Info(
 		"Starting nomad-agent",
 		"version", lib.NomadVersion,
 		"commit", lib.GitCommit[0:7]+lib.GitDirty,
 		"commitTime", lib.GitTime,
+		"config", fmt.Sprintf("%+v", cfg),
 	)
 
 	logger.Info("Creating controller client")
 
-	controllerAddress := defaultControllerAddress
-	if addr := os.Getenv("NOMAD_CONTROLLER_GRPC_ADDRESS"); addr != "" {
-		controllerAddress = addr
-	}
-
 	conn, err := grpc.NewClient(
-		controllerAddress,
+		cfg.ControllerAddress,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	)
 	if err != nil {
@@ -79,7 +58,7 @@ func main() {
 	logger.Info("Warming up Chrome")
 
 	baseChromeCtx := context.Background()
-	if debugVisualChrome {
+	if cfg.DebugChromeGUI {
 		// https://github.com/chromedp/chromedp/issues/311#issuecomment-1029950927
 		var cancelBase context.CancelFunc
 		baseChromeCtx, cancelBase = chromedp.NewExecAllocator(
@@ -102,26 +81,16 @@ func main() {
 		logger.Error("Chrome warmup failed, continuing", "error", err)
 	}
 
-	workerCount := defaultWorkerCount
-	if count := os.Getenv("NOMAD_AGENT_WORKER_COUNT"); count != "" {
-		var err error
-		workerCount, err = strconv.Atoi(count)
-		if err != nil || workerCount <= 0 {
-			logger.Error("Invalid value for NOMAD_AGENT_WORKER_COUNT", "value", count, "error", err)
-			os.Exit(1)
-		}
-	}
-
-	logger.Info("Configured worker count", "count", workerCount)
+	logger.Info("Configured worker count", "count", cfg.WorkerCount)
 
 	workersCtx, stopWorkers := context.WithCancel(context.Background())
 
 	workerWg := &sync.WaitGroup{}
-	workerWg.Add(workerCount)
+	workerWg.Add(cfg.WorkerCount)
 
 	logger.Info("Spinning up workers")
-	for i := 0; i < workerCount; i++ {
-		go agent.NewWorker(
+	for i := 0; i < cfg.WorkerCount; i++ {
+		go worker.New(
 			workersCtx, logger, workerWg, chromedpCtx, i, controller,
 		).ReconnectLoop()
 	}
@@ -142,7 +111,7 @@ func main() {
 		logger.Info("Process received SIGINT/SIGTERM, shutting down")
 		// Cancel worker context and then close controller conn, if any workers are
 		// waiting to Recv(), the closing of conn will trigger another work loop which
-		// will then pickup the ctx
+		// will then pickup the stopped ctx
 		stopWorkers()
 		conn.Close()
 		workerWg.Wait()

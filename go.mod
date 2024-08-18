@@ -3,6 +3,7 @@ module github.com/psidex/nomad
 go 1.22.5
 
 require (
+	github.com/caarlos0/env/v11 v11.2.2
 	github.com/charmbracelet/log v0.4.0
 	github.com/chromedp/cdproto v0.0.0-20240801214329-3f85d328b335
 	github.com/chromedp/chromedp v0.10.0

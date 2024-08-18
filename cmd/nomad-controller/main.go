@@ -1,40 +1,27 @@
 package main
 
 import (
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
 	"os"
 
-	"github.com/charmbracelet/log"
 	"google.golang.org/grpc"
 
 	"github.com/psidex/nomad/internal/lib"
 
 	"github.com/psidex/nomad/internal/controller"
+	"github.com/psidex/nomad/internal/controller/config"
 	pb "github.com/psidex/nomad/internal/controller/pb"
 )
 
 // TODO: A dead worker causes scrape to not start
 
-const (
-	// Default logging level, set using NOMAD_LOG_LEVEL
-	defaultLogLevel = log.DebugLevel
-	// Default controller address, set using NOMAD_CONTROLLER_GRPC_ADDRESS
-	defaultControllerAddress = "0.0.0.0:50051"
-	// Default HTTP server address, set using NOMAD_CONTROLLER_HTTP_ADDRESS
-	defaultHttpAddress = "0.0.0.0:8080"
-)
+func initGrpc(logger *slog.Logger, cfg config.Config) *controller.Server {
+	logger.Info("gRPC listen address configured", "address", cfg.GrpcAddress)
 
-func initGrpc(logger *slog.Logger) *controller.Server {
-	grpcBindAddr := defaultControllerAddress
-	if addr := os.Getenv("NOMAD_CONTROLLER_GRPC_ADDRESS"); addr != "" {
-		grpcBindAddr = addr
-	}
-
-	logger.Info("gRPC listen address configured", "address", grpcBindAddr)
-
-	lis, err := net.Listen("tcp", grpcBindAddr)
+	lis, err := net.Listen("tcp", cfg.GrpcAddress)
 	if err != nil {
 		logger.Error("Failed to listen", "error", err)
 		os.Exit(1)
@@ -60,47 +47,40 @@ func initGrpc(logger *slog.Logger) *controller.Server {
 	return controllerGrpcServer
 }
 
-func initHttp(logger *slog.Logger, controllerGrpcServer *controller.Server) {
-	httpBindAddress := defaultHttpAddress
-	if addr := os.Getenv("NOMAD_CONTROLLER_HTTP_ADDRESS"); addr != "" {
-		httpBindAddress = addr
-	}
-
-	logger.Info("HTTP listen address configured", "address", httpBindAddress)
+func initHttp(logger *slog.Logger, cfg config.Config, controller *controller.Server) {
+	logger.Info("HTTP listen address configured", "address", cfg.HttpAddress)
 
 	staticDir := "public"
 
 	http.Handle("/", http.FileServer(http.Dir(staticDir)))
-	http.HandleFunc("/ws", controllerGrpcServer.Session)
+	http.HandleFunc("/ws", controller.Session)
 
-	if err := http.ListenAndServe(httpBindAddress, nil); err != nil {
+	if err := http.ListenAndServe(cfg.HttpAddress, nil); err != nil {
 		logger.Error("Failed to serve HTTP", "error", err)
 		os.Exit(1)
 	}
 }
 
 func main() {
-	logLevel := defaultLogLevel
-	if level := os.Getenv("NOMAD_LOG_LEVEL"); level != "" {
-		var err error
-		if logLevel, err = log.ParseLevel(level); err != nil {
-			slog.Error("Invalid value for NOMAD_LOG_LEVEL", "value", level, "error", err)
-			os.Exit(1)
-		}
+	cfg, err := config.Init()
+	if err != nil {
+		slog.Error("Could not load config", "error", err)
+		os.Exit(1)
 	}
 
-	logger := lib.NiceLogger(os.Stdout, logLevel)
+	logger := lib.NiceLogger(os.Stdout, cfg.LogLevel)
 	logger.Info(
 		"Starting nomad-controller",
 		"version", lib.NomadVersion,
 		"commit", lib.GitCommit[0:7]+lib.GitDirty,
 		"commitTime", lib.GitTime,
+		"config", fmt.Sprintf("%+v", cfg),
 	)
 
-	controllerGrpcServer := initGrpc(logger)
+	controllerGrpcServer := initGrpc(logger, cfg)
 
 	// Will block until we want to exit / crash
-	initHttp(logger, controllerGrpcServer)
+	initHttp(logger, cfg, controllerGrpcServer)
 
 	logger.Info("Stopped, goodbye")
 }

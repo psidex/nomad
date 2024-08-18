@@ -1,4 +1,4 @@
-package agent
+package worker
 
 import (
 	"context"
@@ -12,6 +12,8 @@ import (
 )
 
 const (
+	// TODO: Add these to config?
+
 	// How many times the worker stream send/recv can error before abandoning
 	streamErrCountThreshold = 5
 
@@ -36,7 +38,8 @@ type Worker struct {
 	controller pb.ControllerClient
 }
 
-func NewWorker(ctx context.Context, parentLogger *slog.Logger, wg *sync.WaitGroup, chromedpCtx context.Context, number int, controller pb.ControllerClient) *Worker {
+// New creates a new Worker struct
+func New(ctx context.Context, parentLogger *slog.Logger, wg *sync.WaitGroup, chromedpCtx context.Context, number int, controller pb.ControllerClient) *Worker {
 	// The number is our local "ID", just to identify logs from different goroutines
 	logger := parentLogger.With("workerNumber", number)
 	return &Worker{
