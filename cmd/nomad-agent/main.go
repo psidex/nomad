@@ -84,20 +84,22 @@ func main() {
 		var cancelBase context.CancelFunc
 		baseChromeCtx, cancelBase = chromedp.NewExecAllocator(
 			context.Background(),
-			append(chromedp.DefaultExecAllocatorOptions[:], chromedp.Flag("headless", false))...,
+			append(
+				chromedp.DefaultExecAllocatorOptions[:],
+				chromedp.Flag("headless", false),
+			)...,
 		)
 		defer cancelBase()
 	}
 
-	// Create a master chromedp context which should keep the headless processes warm.
-	// Also allows us to create contexts off of it, which I think is using a new tab
-	// instead of a whole new browser process.
+	// Create a master chromedp context which when run will start the main browser
+	// process and allow us to create new tabs within it
 	chromedpCtx, cancel := chromedp.NewContext(baseChromeCtx)
 	defer cancel()
 
-	// Ensure Chrome is warm by executing nothing!
+	// Ensure the browser process is running
 	if err := chromedp.Run(chromedpCtx); err != nil {
-		logger.Error("chromedp warmup failed, continuing", "error", err)
+		logger.Error("Chrome warmup failed, continuing", "error", err)
 	}
 
 	workerCount := defaultWorkerCount
