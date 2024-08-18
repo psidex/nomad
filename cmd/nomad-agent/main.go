@@ -28,6 +28,10 @@ const (
 	defaultControllerAddress = "nomad-controller:50051"
 	// Default worker count, set using NOMAD_AGENT_WORKER_COUNT
 	defaultWorkerCount = 1
+
+	// Debugging option to show Chrome GUI, obviously will only work if you're executing
+	// in a GUI environment
+	debugVisualChrome = false
 )
 
 func main() {
@@ -74,13 +78,21 @@ func main() {
 
 	logger.Info("Warming up Chrome")
 
+	baseChromeCtx := context.Background()
+	if debugVisualChrome {
+		// https://github.com/chromedp/chromedp/issues/311#issuecomment-1029950927
+		var cancelBase context.CancelFunc
+		baseChromeCtx, cancelBase = chromedp.NewExecAllocator(
+			context.Background(),
+			append(chromedp.DefaultExecAllocatorOptions[:], chromedp.Flag("headless", false))...,
+		)
+		defer cancelBase()
+	}
+
 	// Create a master chromedp context which should keep the headless processes warm.
 	// Also allows us to create contexts off of it, which I think is using a new tab
 	// instead of a whole new browser process.
-	chromedpCtx, cancel := chromedp.NewContext(
-		context.Background(),
-	)
-	// TODO: Cancel anywhere else? need to do chromedp.FromContext(ctx).Allocator.Wait?
+	chromedpCtx, cancel := chromedp.NewContext(baseChromeCtx)
 	defer cancel()
 
 	// Ensure Chrome is warm by executing nothing!
