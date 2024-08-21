@@ -20,6 +20,8 @@ import (
 	"github.com/psidex/nomad/internal/controller/pb"
 )
 
+// TODO: Tidy this up! probably refactor needed
+
 var (
 	upgrader                = websocket.Upgrader{}
 	DEBUG_TOTAL_BYTES int64 = 0
@@ -36,15 +38,14 @@ type SessionConfig struct {
 
 type Server struct {
 	pb.UnimplementedControllerServer
-	logger *slog.Logger
-	// TODO: urlsToScrape batching using []string
-	urlsToScrape chan string
-	outputs      chan *pb.ScrapedData
-	frontEnd     *graphology.GraphologyWs
-	// For setting worker IDs // TODO: -1 when worker drops?
-	workerCount int32
+	logger          *slog.Logger
+	stopScraping    chan struct{}
+	scrapedDataChan chan *pb.ScrapedData
+	frontEnd        *graphology.GraphologyWs
+	// For setting worker IDs, not an actual count of workers currently connected
+	workerIdCounter int32
 	// Set / reset per run
-	frontier frontier.Frontier
+	frontier *frontier.Frontier
 }
 
 func init() {
@@ -52,20 +53,18 @@ func init() {
 }
 
 func NewServer(logger *slog.Logger, randomCrawl bool) (*Server, error) {
-	s := &Server{
-		logger:       logger,
-		urlsToScrape: make(chan string),
-		outputs:      make(chan *pb.ScrapedData),
-		workerCount:  0,
-		frontier:     frontier.NewFrontier(randomCrawl),
-	}
-
-	go s.feedWorkers()
-
-	return s, nil
+	return &Server{
+		logger:          logger,
+		stopScraping:    make(chan struct{}),
+		scrapedDataChan: make(chan *pb.ScrapedData),
+		workerIdCounter: 0,
+		frontier:        frontier.NewFrontier(randomCrawl),
+	}, nil
 }
 
 func (s *Server) Session(w http.ResponseWriter, r *http.Request) {
+	// TODO: Only allow one session at a time, e.g. check here and then reject
+
 	c, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Println("ws upgrade err:", err)
@@ -87,6 +86,7 @@ func (s *Server) Session(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.stopScraping = make(chan struct{})
 	s.frontEnd = graphology.NewGraphologyWs(ws)
 
 	for _, initialUrl := range cfg.InitialUrls {
@@ -98,58 +98,80 @@ func (s *Server) Session(w http.ResponseWriter, r *http.Request) {
 		s.frontier.AddUrl(toAdd)
 	}
 
-	for {
-		work := <-s.outputs
-		s.logger.Debug("handle work loop got work", "work", work)
-		if s.frontEnd != nil {
-			scrapedHostname, _ := getHostname(work.ScrapedUrl)
+	// Take scraped data, process it, send info to front end if required
+	go func() {
+		for {
+			select {
+			case <-s.stopScraping:
+				return
+			case work := <-s.scrapedDataChan:
+				s.logger.Debug("handle work loop got work", "work", work)
+				if s.frontEnd != nil {
+					scrapedHostname, _ := getHostname(work.ScrapedUrl)
 
-			for _, url := range work.FoundUrls {
-				foundHostname, err := getHostname(url)
-				if err != nil {
-					continue
+					for _, url := range work.FoundUrls {
+						foundHostname, err := getHostname(url)
+						if err != nil {
+							continue
+						}
+
+						if foundHostname == scrapedHostname {
+							continue
+						}
+
+						foundHostnameAsUrl, err := getHostnameAsUrl(url)
+						if err != nil {
+							continue
+						}
+
+						s.logger.Debug("Trying to add hostname connection", "from", scrapedHostname, "to", foundHostname, "foundHostnameAsUrl", foundHostnameAsUrl)
+						if added := s.frontier.AddUrl(foundHostnameAsUrl); added {
+							s.logger.Debug("Adding hostname connection", "from", scrapedHostname, "to", foundHostname)
+							s.frontEnd.AddHostnameConnection(scrapedHostname, foundHostname)
+						}
+
+					}
+					// TODO: dead-end support
+					s.frontEnd.NotifyEndCrawl(1, scrapedHostname, false)
 				}
-
-				if foundHostname == scrapedHostname {
-					continue
-				}
-
-				foundHostnameAsUrl, err := getHostnameAsUrl(url)
-				if err != nil {
-					continue
-				}
-
-				s.logger.Debug("Trying to add hostname connection", "from", scrapedHostname, "to", foundHostname, "foundHostnameAsUrl", foundHostnameAsUrl)
-				if added := s.frontier.AddUrl(foundHostnameAsUrl); added {
-					s.logger.Debug("Adding hostname connection", "from", scrapedHostname, "to", foundHostname)
-					s.frontEnd.AddHostnameConnection(scrapedHostname, foundHostname)
-				}
-
+			default:
+				// TODO: Same sleep as the other?
+				time.Sleep(time.Second)
 			}
-			// TODO: dead-end support
-			s.frontEnd.NotifyEndCrawl(1, scrapedHostname, false)
 		}
+	}()
+
+	// Wait for either a stop messgae from the client of the duration to finish
+	wsrecv := make(chan struct{})
+	timer := time.NewTimer(cfg.Runtime.Duration)
+
+	go func() {
+		// Client can send anything and it will cancel the session.
+		// Warning: As this is the thread-safe version, this will block any other reads.
+		_, _, _ = ws.ReadMessage()
+		// If we never read a message, the outer function call will return, closing the
+		// WS and causing ReadMessage to return an error, which will end this goroutine.
+		close(wsrecv)
+	}()
+
+	select {
+	case <-timer.C:
+	case <-wsrecv:
 	}
+
+	s.cancelCurrent()
 }
 
-func (s *Server) feedWorkers() {
-	// TODO: Cancellation! and general graceful shutdown
+func (s *Server) cancelCurrent() {
+	close(s.stopScraping)
+	s.frontier.Flush()
+	// Empty the channel just in case
+L:
 	for {
-		if currentlUrl := s.frontier.PopUrl(); currentlUrl != "" {
-			// Unbuffered chan means we just sit here until something can read
-			s.urlsToScrape <- currentlUrl
-
-			//
-			if currentHostname, err := getHostname(currentlUrl); err == nil {
-				if s.frontEnd != nil {
-					s.frontEnd.NotifyStartCrawl(1, currentHostname)
-				}
-			}
-
-		} else {
-			// Don't spam popurl as fast as possible
-			// TODO: Config time here?
-			time.Sleep(time.Second)
+		select {
+		case <-s.scrapedDataChan:
+		default:
+			break L
 		}
 	}
 }
@@ -184,8 +206,8 @@ func (s *Server) WorkerStream(srv pb.Controller_WorkerStreamServer) error {
 		)
 	}
 
-	s.workerCount += 1
-	workerId := s.workerCount
+	s.workerIdCounter += 1
+	workerId := s.workerIdCounter
 
 	logger := s.logger.With("workerId", workerId)
 
@@ -206,7 +228,7 @@ func (s *Server) WorkerStream(srv pb.Controller_WorkerStreamServer) error {
 		return nil
 	}
 
-	// Work loop
+workLoop:
 	for {
 		select {
 		case <-ctx.Done():
@@ -214,38 +236,52 @@ func (s *Server) WorkerStream(srv pb.Controller_WorkerStreamServer) error {
 			return ctx.Err()
 		default:
 		}
+		if url := s.frontier.PopUrl(); url != "" {
+			if currentHostname, err := getHostname(url); err != nil && s.frontEnd != nil {
+				s.frontEnd.NotifyStartCrawl(uint(workerId), currentHostname)
+			}
 
-		url := <-s.urlsToScrape
-		logger.Debug("Issuing URL to worker", "url", url)
+			logger.Debug("Issuing URL to worker", "url", url)
 
-		resp := pb.ControllerMessage{
-			Message: &pb.ControllerMessage_ScrapeInstruction{
-				ScrapeInstruction: &pb.ScrapeInstruction{Urls: []string{url}},
-			},
-		}
-		if err := srv.Send(&resp); err != nil {
-			logger.Error("Failed to send on worker stream", "workerId", workerId, "error", err)
-		}
+			resp := pb.ControllerMessage{
+				Message: &pb.ControllerMessage_ScrapeInstruction{
+					ScrapeInstruction: &pb.ScrapeInstruction{Urls: []string{url}},
+				},
+			}
+			if err := srv.Send(&resp); err != nil {
+				logger.Error("Failed to send on worker stream", "workerId", workerId, "error", err)
+			}
 
-		req, err := srv.Recv()
-		if err == io.EOF {
-			logger.Error("Received EOF on worker stream", "workerId", workerId)
-			break
-		}
-		if err != nil {
-			logger.Error("Received error on worker stream", "workerId", workerId, "error", err)
-			continue
-		}
+			req, err := srv.Recv()
+			if err == io.EOF {
+				logger.Error("Received EOF on worker stream", "workerId", workerId)
+				break workLoop
+			}
+			if err != nil {
+				// TODO: Similar retry/break logic to the agent counterpart of this loop?
+				logger.Error("Received error on worker stream", "workerId", workerId, "error", err)
+				continue workLoop
+			}
 
-		data := req.GetData()
-		if data == nil {
-			logger.Error("Received nil data from worker", "req", req)
+			data := req.GetData()
+			if data == nil {
+				logger.Error("Received nil data from worker", "req", req)
+			} else {
+				// TODO: Remove this global var and log?
+				DEBUG_TOTAL_BYTES += data.Metrics.ResponseSizeBytes
+				megabytes := float64(DEBUG_TOTAL_BYTES) / (1024 * 1024)
+				logger.Debug("Downloaded", "megabytes", megabytes)
+				select {
+				case <-s.stopScraping:
+					// Don't do anything with this data, continue operation as normal
+					continue workLoop
+				default:
+				}
+				s.scrapedDataChan <- data
+			}
 		} else {
-			// TODO: Remove this global var and log?
-			DEBUG_TOTAL_BYTES += data.Metrics.ResponseSizeBytes
-			megabytes := float64(DEBUG_TOTAL_BYTES) / (1024 * 1024)
-			logger.Debug("Downloaded", "megabytes", megabytes)
-			s.outputs <- data
+			// TODO: Same sleep as the other? configurable?
+			time.Sleep(time.Second)
 		}
 	}
 

@@ -141,6 +141,7 @@ mainLoop:
 				}
 
 				if err := stream.Send(resp); err != nil {
+					// TODO: Some sort of retry for this message that will otherwise be lost?
 					w.logger.Error("Failed to send on worker stream", "error", err)
 					streamErrCount++
 					continue mainLoop

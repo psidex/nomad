@@ -9,6 +9,7 @@ require (
 	github.com/chromedp/chromedp v0.10.0
 	github.com/corpix/uarand v0.2.0
 	github.com/gorilla/websocket v1.5.3
+	github.com/joho/godotenv v1.5.1
 	golang.org/x/net v0.27.0
 	google.golang.org/grpc v1.65.0
 	google.golang.org/protobuf v1.34.2

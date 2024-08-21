@@ -20,13 +20,21 @@ type Frontier struct {
 
 // NewFrontier creates a new Frontier. The random parameter determines if the popped
 // URLs are random or FIFO.
-func NewFrontier(random bool) Frontier {
-	return Frontier{
+func NewFrontier(random bool) *Frontier {
+	return &Frontier{
 		random:    random,
 		queue:     NewQueue(),
 		visitedMu: &sync.Mutex{},
 		visited:   NewSet(),
 	}
+}
+
+// Flush resets the state of the frontier completely
+func (f *Frontier) Flush() {
+	f.visitedMu.Lock()
+	defer f.visitedMu.Unlock()
+	f.queue = NewQueue()
+	f.visited = NewSet()
 }
 
 // AddUrl adds a URL to the frontier, returns true if added, false if it's already been

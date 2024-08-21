@@ -3,6 +3,7 @@ package config
 import (
 	"github.com/caarlos0/env/v11"
 	"github.com/charmbracelet/log"
+	_ "github.com/joho/godotenv/autoload"
 )
 
 type Config struct {
