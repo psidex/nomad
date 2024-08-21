@@ -49,12 +49,6 @@ func NewWebServer(
 	stopper *Stopper,
 	scrapedDataChan chan *pb.ScrapedData,
 ) *WebServer {
-	go func() {
-		for {
-			logger.Debug("State of stopper", "IsStopped", stopper.IsStopped())
-			time.Sleep(time.Second)
-		}
-	}()
 	return &WebServer{
 		logger:          logger,
 		frontier:        frontier,
@@ -86,9 +80,9 @@ func (w *WebServer) Session(respWriter http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// See note on Stopper{} for reason to use closure
-	defer func() { w.stopper.Stop() }()
 	w.stopper.Reset()
+	// Must defer after Reset() so the evaluated receiver contains the correct values
+	defer w.stopper.Stop()
 
 	c, err := upgrader.Upgrade(respWriter, req, nil)
 	if err != nil {

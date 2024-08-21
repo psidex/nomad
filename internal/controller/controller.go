@@ -14,9 +14,9 @@ import (
 	"github.com/psidex/nomad/internal/controller/pb"
 )
 
-// TODO: Tidy this up! probably refactor needed
 var (
-	DEBUG_TOTAL_BYTES int64 = 0
+	// TODO: Remove, do this on the frontend
+	DEBUG_TOTAL_METRICS = pb.ScrapeMetrics{}
 )
 
 type Server struct {
@@ -154,13 +154,14 @@ workLoop:
 			if data == nil {
 				logger.Error("Received nil data from worker", "req", req)
 			} else {
-				// TODO: Remove this global var and log?
-				DEBUG_TOTAL_BYTES += data.Metrics.ResponseSizeBytes
-				megabytes := float64(DEBUG_TOTAL_BYTES) / (1024 * 1024)
-				logger.Debug("Downloaded", "megabytes", megabytes)
+				DEBUG_TOTAL_METRICS.ResponseSizeBytes += data.Metrics.ResponseSizeBytes
+				DEBUG_TOTAL_METRICS.NumFoundUrls += data.Metrics.NumFoundUrls
+				DEBUG_TOTAL_METRICS.ScrapeDurationMs += data.Metrics.ScrapeDurationMs
+				logger.Debug("", "DEBUG_TOTAL_METRICS", &DEBUG_TOTAL_METRICS)
+
 				if s.stopper.IsStopped() {
 					// Don't do anything with this data, continue operation as normal
-					s.logger.Debug("Chucking data as we've stopped")
+					s.logger.Debug("Binning scrape data as stopper is stopped")
 					continue workLoop
 				}
 				s.scrapedDataChan <- data

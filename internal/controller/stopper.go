@@ -6,10 +6,7 @@ import (
 
 // TODO: Move to lib?
 
-// Stopper helps with stopping the execution of things. Don't make copies! WARNING: If
-// deferring Stop(), wrap it in a closure so that your Stopper pointer isn't
-// dereferenced, see https://victoriametrics.com/blog/defer-in-go/.
-// TODO: Confirm this warning is correct, reproduce on go playground?
+// Stopper helps with stopping the execution of things. Don't make copies!
 type Stopper struct {
 	tidy func()
 	// Select on this to know when stopped, or call IsStopped to check.
