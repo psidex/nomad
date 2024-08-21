@@ -28,13 +28,7 @@ func initGrpc(logger *slog.Logger, cfg config.Config) *controller.Server {
 	}
 
 	grpcServer := grpc.NewServer()
-
-	controllerGrpcServer, err := controller.NewServer(logger, false)
-	if err != nil {
-		logger.Error("Failed to create new gRPC server", "error", err)
-		os.Exit(1)
-	}
-
+	controllerGrpcServer := controller.NewServer(logger, false)
 	pb.RegisterControllerServer(grpcServer, controllerGrpcServer)
 
 	go func() {
@@ -53,7 +47,7 @@ func initHttp(logger *slog.Logger, cfg config.Config, controller *controller.Ser
 	staticDir := "public"
 
 	http.Handle("/", http.FileServer(http.Dir(staticDir)))
-	http.HandleFunc("/ws", controller.Session)
+	http.HandleFunc("/ws", controller.Ws.Session)
 
 	if err := http.ListenAndServe(cfg.HttpAddress, nil); err != nil {
 		logger.Error("Failed to serve HTTP", "error", err)
