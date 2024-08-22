@@ -67,7 +67,6 @@ func (w *WebServer) NotifyStartCrawl(workerId int32, hostname string) {
 func (w *WebServer) Session(respWriter http.ResponseWriter, req *http.Request) {
 	if w.clientActive.Load() {
 		w.logger.Warn("Rejecting client as we already have one")
-		_, _ = respWriter.Write([]byte("go away"))
 		return
 	}
 
@@ -76,13 +75,11 @@ func (w *WebServer) Session(respWriter http.ResponseWriter, req *http.Request) {
 
 	if !w.stopper.IsStopped() {
 		w.logger.Error("Rejecting client as stopper is not currently stopped")
-		_, _ = respWriter.Write([]byte("something broke"))
 		return
 	}
 
-	w.stopper.Reset()
-	// Must defer after Reset() so the evaluated receiver contains the correct values
 	defer w.stopper.Stop()
+	w.stopper.UnStop()
 
 	c, err := upgrader.Upgrade(respWriter, req, nil)
 	if err != nil {

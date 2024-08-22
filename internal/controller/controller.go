@@ -40,7 +40,7 @@ func NewServer(logger *slog.Logger, randomCrawl bool) *Server {
 		workerIdCounter: 0,
 	}
 	s.stopper = NewStopper(s.Flush)
-	// Start stopped. A new webserver session will restart it.
+	// Stop now - WebServer.Session will restart it
 	s.stopper.Stop()
 	ws := NewWebServer(s.logger, s.frontier, s.stopper, s.scrapedDataChan)
 	s.Ws = ws
@@ -48,7 +48,7 @@ func NewServer(logger *slog.Logger, randomCrawl bool) *Server {
 }
 
 func (s *Server) Flush() {
-	s.logger.Debug("Flushing")
+	s.logger.Debug("Flushing frontier & scrapedDataChan")
 	s.frontier.Flush()
 	// Remove anything that finishing worker routines sent
 L:
@@ -115,7 +115,7 @@ func (s *Server) WorkerStream(srv pb.Controller_WorkerStreamServer) error {
 
 	logger.Info("Registered new worker")
 
-workLoop:
+workerLoop:
 	for {
 		select {
 		case <-ctx.Done():
@@ -142,12 +142,12 @@ workLoop:
 			req, err := srv.Recv()
 			if err == io.EOF {
 				logger.Error("Received EOF on worker stream", "workerId", workerId)
-				break workLoop
+				break workerLoop
 			}
 			if err != nil {
 				// TODO: Similar retry/break logic to the agent counterpart of this loop?
 				logger.Error("Received error on worker stream", "workerId", workerId, "error", err)
-				continue workLoop
+				continue workerLoop
 			}
 
 			data := req.GetData()
@@ -162,7 +162,7 @@ workLoop:
 				if s.stopper.IsStopped() {
 					// Don't do anything with this data, continue operation as normal
 					s.logger.Debug("Binning scrape data as stopper is stopped")
-					continue workLoop
+					continue workerLoop
 				}
 				s.scrapedDataChan <- data
 			}

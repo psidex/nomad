@@ -4,34 +4,44 @@ import (
 	"sync"
 )
 
-// TODO: Move to lib?
+// TODO: Move to lib
 
-// Stopper helps with stopping the execution of things. Don't make copies!
+// Stopper helps with sychronising a stop, thread safe via a mutex. Don't make copies!
 type Stopper struct {
-	tidy func()
-	// Select on this to know when stopped, or call IsStopped to check.
+	mu      sync.Mutex
+	stopped func()
+	// Select on this to know when stopped, or call Stopper.IsStopped to check.
 	// Don't do anything else to this other than selecting!
 	Ch chan struct{}
-	// Call this as many times as you want to stop
-	Stop func()
 }
 
-// NewStopper creates a new stopper. Pass a tidy func to run on stopping.
-func NewStopper(tidy func()) *Stopper {
-	s := &Stopper{tidy: tidy}
-	s.Reset()
-	return s
+// NewStopper creates a new stopper. Pass a function to run on stopping.
+func NewStopper(stopped func()) *Stopper {
+	return &Stopper{sync.Mutex{}, stopped, make(chan struct{})}
 }
 
-// Reset will un-stop the stopper if needed
-func (s *Stopper) Reset() {
-	s.Ch = make(chan struct{})
-	s.Stop = sync.OnceFunc(func() {
+// UnStop will un-stop the stopper, if needed. Blocks any other UnStop() or Stop()
+// calls.
+func (s *Stopper) UnStop() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.IsStopped() {
+		s.Ch = make(chan struct{})
+	}
+}
+
+// Stop the stopper. Blocks any other UnStop() or Stop() calls. If this stops, the saved
+// function will be called.
+func (s *Stopper) Stop() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.IsStopped() {
 		close(s.Ch)
-		s.tidy()
-	})
+		s.stopped()
+	}
 }
 
+// IsStopped checks if the stopper is stopped. Directly checks the goroutine,
 func (s *Stopper) IsStopped() bool {
 	select {
 	case <-s.Ch:
