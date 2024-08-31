@@ -17,6 +17,7 @@
     "@react-sigma/layout-core": "4.0.3",
     "@react-sigma/layout-forceatlas2": "4.0.3",
     "graphology": "^0.25.4",
+    "graphology-gexf": "^0.13.1",
     "graphology-types": "^0.24.7",
     "lucide-react": "0.418.0",
     "react": "^18.2.0",

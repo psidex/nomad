@@ -2,6 +2,7 @@ import React, { useRef, useState } from 'react';
 
 import { useSigma } from '@react-sigma/core';
 import { Power, PowerOff } from 'lucide-react';
+import gexf from 'graphology-gexf';
 
 import './css/sidebar.css';
 
@@ -62,6 +63,18 @@ export default function Sidebar() {
     const a = document.createElement('a');
     a.setAttribute('href', dataStr);
     a.setAttribute('download', 'nomadgraph.json');
+    a.click();
+    a.remove();
+  };
+
+  const exportGraphGEXF = () => {
+    const gexfStr = gexf.write(
+      sigma.getGraph(),
+    );
+    const dataStr = `data:text/xml;charset=utf-8,${encodeURIComponent(gexfStr)}`;
+    const a = document.createElement('a');
+    a.setAttribute('href', dataStr);
+    a.setAttribute('download', 'nomadgraph.gexf');
     a.click();
     a.remove();
   };
@@ -210,6 +223,7 @@ export default function Sidebar() {
       <div className="sidebar-buttons">
         <button type="button" onClick={importGraph} disabled={buttonState !== ButtonStates.StartOnly}>Import</button>
         <button type="button" onClick={exportGraph} disabled={buttonState !== ButtonStates.ResetOnly}>Export</button>
+        <button type="button" onClick={exportGraphGEXF} disabled={buttonState !== ButtonStates.ResetOnly}>Export GEXF</button>
       </div>
       <input ref={fileInputRef} type="file" accept="application/json" style={{ display: 'none' }} onChange={fileUpload} />
     </form>
