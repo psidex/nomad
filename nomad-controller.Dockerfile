@@ -1,9 +1,14 @@
 FROM golang:latest AS go-builder
 WORKDIR /build
-COPY . .
+COPY .git .git
+COPY cmd cmd
+COPY internal internal
+COPY go.mod .
+COPY go.sum .
+COPY LICENSE .
 RUN CGO_ENABLED=0 GOOS=linux go build -buildvcs=true -o ./nomad-controller ./cmd/nomad-controller
 
-FROM node:20.11 AS frontend-builder
+FROM node:20 AS frontend-builder
 ENV PATH=/build/node_modules/.bin:$PATH
 WORKDIR /build
 COPY nomad-frontend .

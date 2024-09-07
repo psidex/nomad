@@ -1,9 +1,9 @@
 #!/bin/bash
 #
-# usage: ./run.sh command [argument ...]
+# Usage: ./run.sh command [args...]
 #
 # See https://death.andgravity.com/run-sh
-# for an explanation of how it works and why it's useful.
+#
 
 set -ex
 
